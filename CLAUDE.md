@@ -70,54 +70,116 @@ core:bridge, core:model — bottom-level, cross-cutting
 
 ### Core execution flow
 
-1. `ChatViewModel.send()` → `ForegroundController` → `AgentLoop.processUserMessage()`
-2. `ToolCallAgentLoop` builds system prompt (with skill directory) + tool definitions
-3. Sends to LLM via OpenAI `tool_calls` protocol
-4. If LLM returns `tool_calls`: execute each tool (through `ToolPolicyEngine` + `ToolPermissionGate`) → append results → loop
-5. If LLM calls `use_skill`: load SKILL.md and execute (inline or fork mode)
-6. If LLM calls `create_plan`: create structured plan, wait for user approval
-7. Tool results flow back to UI via `MessageBus`
+1. `ChatViewModel.send()` → `ForegroundController` → `AgentLoop.processUserMessage()` (per-chat mutex in AgentLoop, delegates to ToolCallAgentLoop)
+2. `ToolCallAgentLoop` builds system prompt (with skill catalog from `SkillRegistry`) + tool definitions from `ToolRegistry`
+3. `LlmConfigurator.beforeRequest()` syncs API key / base URL / model to the LLM client
+4. Sends to LLM via OpenAI `tool_calls` protocol via `LlmClient.chat()` (blocking) or `.chatStream()` (SSE)
+5. If LLM returns `tool_calls`: execute each tool (through `ToolPolicyEngine` capability/foreground/connectivity checks + `ToolPermissionGate` user approval) → append results → loop
+6. If LLM calls `use_skill`: `SkillTool` routes to `SkillExecutor` → load SKILL.md → inline (inject guidance into context) or fork (spawn SubAgentRunner)
+7. If LLM calls `create_plan`: `CreatePlanTool` stores in `PlanManager`, loop pauses, sends `TodoListCard` + `ActionPrompt` to UI, waits for user approve/edit/cancel
+8. Tool results flow back to UI via `MessageBus.outbound` SharedFlow
 
 ### Key components
 
-- **ToolCallAgentLoop** (`core/domain`): Main agent loop implementing tool_calls iteration
-- **ToolRegistry** (`core/domain/tools/ToolRegistry.kt`): Collects, filters, and executes tools based on device capabilities
-- **SkillExecutor** (`core/domain/skill/SkillExecutor.kt`): Executes SKILL.md skills in inline or fork mode
-- **PlanManager** (`core/domain/agent/PlanManager.kt`): State machine for plan mode (NONE/PENDING/EXECUTING/DONE)
-- **SubtaskExecutor** (`core/domain/subtask/SubtaskExecutor.kt`): Creates/manages subtasks with shared facts
-- **MessageBus** (`core/bus`): Real-time Agent-to-UI messaging channel
+| Component | File | Role |
+|---|---|---|
+| `AgentLoop` | `core/domain/AgentLoop.kt` | Top-level entry with per-session mutex; delegates to ToolCallAgentLoop |
+| `ToolCallAgentLoop` | `core/domain/agent/ToolCallAgentLoop.kt` | Main tool_calls iteration: build prompt → LLM → execute tools → loop |
+| `ToolRegistry` | `core/domain/tools/ToolRegistry.kt` | Collects all tools via Hilt `@IntoSet`, filters by device capabilities, executes |
+| `ToolPolicyEngine` | `core/domain/tools/ToolPolicyEngine.kt` | Checks capability, foreground, and connectivity constraints before execution |
+| `ToolPermissionGate` | `core/domain/tools/ToolPermissionGate.kt` | User approval gate for tools with `requiresUserApproval: true` |
+| `SkillTool` | `core/domain/tools/SkillTool.kt` | The `use_skill` tool — LLM routes to skills through this |
+| `SkillExecutor` | `core/domain/skill/SkillExecutor.kt` | Executes SKILL.md skills: inline (context injection) or fork (sub-agent) |
+| `SkillRegistry` | `core/domain/skill/SkillRegistry.kt` | Multi-source skill registry with priority override (Bundled < Cloud < User) |
+| `PlanManager` | `core/domain/agent/PlanManager.kt` | Plan state machine: NONE → PENDING → EXECUTING → DONE |
+| `SubtaskExecutor` | `core/domain/subtask/SubtaskExecutor.kt` | Creates/manages subtasks with independent sessions and shared facts |
+| `MessageBus` | `core/bus/MessageBus.kt` | SharedFlow-based Agent→UI channel (`inbound`/`outbound` flows) |
+| `MemoryFacade` | `core/domain/memory/MemoryFacade.kt` | Working memory, session summaries, fact retrieval |
 
 ### Data persistence
 
 - Chat messages stored in **Room** database (`AppDatabase` with SessionDao, MessageDao)
 - Primary chat session: `chatId = "main"` → session key `mobile:main`
 - User settings (API key, base URL, model) stored via DataStore/SharedPreferences
-- Working memory and facts persisted in Room tables
+- Working memory and facts persisted in Room tables (through `MemoryFacade` + `MemoryFileRepository`)
 
 ## Key Patterns
+
+### Hilt DI / Module Binding
+
+Two primary DI modules wire up the agent's tool and bridge layers:
+
+| Module | File | Pattern |
+|---|---|---|
+| `DomainToolModule` | `core/domain/DomainModule.kt` | `@Binds @IntoSet Tool` — 30+ tool bindings |
+| `BridgeModule` | `core/bridge/di/BridgeModule.kt` | `@Provides @Singleton DeviceCapabilityBridge` — switches between real/virtual |
+| `NetworkModule` | `core/network/NetworkModule.kt` | Binds `LlmClient` to `OpenAiCompatibleClient` |
+
+The `BridgeModule` companion decides at startup whether to use `SwitchableDeviceCapabilityBridge` (if any bridge is virtual) or `AndroidDeviceCapabilityBridge` directly. The `virtual_bridge_config.json` controls which bridges are virtual.
+
+### Tool definition pattern
+
+Tools implement the `DomainToolModule` Hilt multi-binding pattern. Each tool declares:
+- `name` (e.g., "open_url") — unique string identifier the LLM uses to call it
+- `definition: ToolDefinition` — JSON schema (`name`, `description`, `parametersSchema` as raw JSON string)
+- `requiredCapabilities` — set of Android permissions/features needed
+- `executionPolicy: ToolExecutionPolicy` — `requiresUserApproval`, `requiresForeground`, `requiresConnectivity`, `hasSideEffects`
+- `risk: ToolRisk` — `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`
+- `suspend fun execute(argumentsJson: String): ToolResult` — returns `ToolResult(ok, message, dataJson?)`
+
+Tools access Android APIs through `DeviceCapabilityBridge` interface (property-per-capability: `.files`, `.contacts`, `.browser`, etc.), never directly through Android SDK calls.
+
+### Skill system
+
+Skills are defined as SKILL.md files (YAML frontmatter + Markdown body) in `core/data/src/main/assets/skills/md/`. Additional bundled skills use JSON format in `skills/bundled/` and `skills/scenarios/`. At startup, `SkillAssetLoader.loadAllSkills()` loads and registers all skills into `SkillRegistry`.
+
+SKILL.md YAML frontmatter fields (parsed by `SkillMdParser`):
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable name |
+| `description` | string | What the skill does (shown to LLM) |
+| `category` | string | Grouping category |
+| `allowed-tools` | list | Tool names the skill can use |
+| `context` | `inline`/`fork` | Execution mode |
+| `effort` | `low`/`medium`/`high` | Estimated effort |
+| `risk` | `low`/`medium`/`high`/`critical` | Risk level |
+| `requires` | map | `permissions`, `connectivity`, `apps`, `minApi` |
+| `conditions` | map | `time`, `location-type`, `device-state` |
+| `composes-skills` | list | Sub-skills this skill can invoke |
+| `required-services` | list | External service IDs needed |
+| `always` | bool | Always inject this skill's guidance |
+| `disable-model-invocation` | bool | Block LLM from invoking it directly |
+| `prompt-summary` | string | Short summary for prompt (defaults to description) |
 
 ### Virtual Bridge System (for emulator testing)
 
 Many tools depend on real Android hardware (contacts, SMS, location). The **Virtual Bridge** system provides mock data for testing on emulators.
 
 - Config file: `app/src/main/assets/virtual_bridge_config.json`
+- Format: `{ "defaultMode": "virtual", "bridges": { "contacts": "virtual", "browser": "real", ... } }`
+- Available bridges: `telephony`, `contacts`, `location`, `notifications`, `files`, `services`, `accessibility`, `media`, `browser`, `maps`, `clipboard`, `share`, `system`, `appState`
 - Each bridge can be independently set to `"virtual"` or `"real"`
-- `SwitchableDeviceCapabilityBridge` routes calls based on config
+- `SwitchableDeviceCapabilityBridge` routes calls based on config at runtime
 - Virtual mock data: `VirtualMockData.kt` (contacts, location, notifications, etc.)
+- `VirtualBridgeManager.hasAnyVirtual()` controls whether the switchable bridge is used at all
 
-### Tool definition pattern
+### LLM Client Interface
 
-Tools implement the `DomainToolModule` Hilt multi-binding pattern. Each tool declares:
-- `name` (e.g., "open_url")
-- `ToolDefinition` (JSON schema for LLM)
-- `requiredCapabilities` (device capabilities needed)
-- `executionPolicy` (permission requirements)
+The `LlmClient` interface (`core/network/LlmClient.kt`) abstracts model communication:
 
-Tools access Android APIs through `DeviceCapabilityBridge` interface, never directly.
+```kotlin
+interface LlmClient {
+    var defaultModel: String
+    suspend fun chat(messages, tools, model, maxTokens): LlmResponse
+    fun chatStream(messages, tools, model, maxTokens): Flow<StreamEvent>
+}
+```
 
-### Skill system
-
-Skills are defined as SKILL.md files (YAML frontmatter + Markdown body) in `core/data/src/main/assets/skills/md/`. Additional bundled skills use JSON format in `skills/bundled/` and `skills/scenarios/`. At startup, `SkillAssetLoader.loadAllSkills()` loads and registers all skills into `SkillRegistry`.
+- `LlmMessage` has `role`, `content`, `toolCallId`, `name`, `toolCalls`
+- `LlmResponse` has `content`, `toolCalls`, `finishReason`
+- Implemented by `OpenAiCompatibleClient` (OpenAI protocol) and `NanobotStreamClient` (SSE streaming)
+- `NetworkModule` binds the client via Hilt
 
 ## Testing
 

@@ -7,7 +7,6 @@ import com.mobilebot.domain.ForegroundController
 import com.mobilebot.domain.agent.CurrentSessionKeyProvider
 import com.mobilebot.domain.agent.RuntimeEvent
 import com.mobilebot.domain.agent.ToolCallAgentLoop
-import com.mobilebot.domain.memory.MemoryFacade
 import com.mobilebot.domain.repository.SessionRepository
 import com.mobilebot.model.OutboundMessage
 import kotlinx.coroutines.CoroutineScope
@@ -46,7 +45,6 @@ class SubtaskExecutor
         private val toolCallLoopProvider: Provider<ToolCallAgentLoop>,
         private val agentLoopProvider: Provider<AgentLoop>,
         private val sessions: SessionRepository,
-        private val memory: MemoryFacade,
         private val bus: MessageBus,
         private val sessionKeyProvider: CurrentSessionKeyProvider,
         private val foreground: ForegroundController,

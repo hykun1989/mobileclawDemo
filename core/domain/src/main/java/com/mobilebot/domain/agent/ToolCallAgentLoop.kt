@@ -4,9 +4,9 @@ import android.util.Log
 import com.mobilebot.domain.LlmConfigurator
 import com.mobilebot.domain.SkillsLoader
 import com.mobilebot.domain.interaction.ActionOption
-import com.mobilebot.domain.memory.MemoryFacade
 import com.mobilebot.domain.memory.MemoryDigestBuilder
 import com.mobilebot.domain.memory.MemoryType
+import com.mobilebot.domain.memory.WorkspaceContextManager
 import com.mobilebot.domain.memory.PersistentMemoryManager
 import com.mobilebot.domain.permissions.AgentCapability
 import com.mobilebot.domain.permissions.AgentCapabilityStore
@@ -52,7 +52,6 @@ class ToolCallAgentLoop @Inject constructor(
     private val toolGate: ToolPermissionGate,
     private val sessions: SessionRepository,
     private val memoryFiles: MemoryFileRepository,
-    private val memory: MemoryFacade,
     private val persistentMemory: PersistentMemoryManager,
     private val skillsLoader: SkillsLoader,
     private val permissionCoordinator: AgentPermissionCoordinator,
@@ -62,6 +61,7 @@ class ToolCallAgentLoop @Inject constructor(
     private val llmConfigurator: LlmConfigurator,
     private val sessionKeyProvider: CurrentSessionKeyProvider,
     private val planManager: PlanManager,
+    private val workspaceContext: WorkspaceContextManager,
 ) {
 
     @Volatile
@@ -90,7 +90,7 @@ class ToolCallAgentLoop @Inject constructor(
 
         val snapshot = ensureSkillSnapshot()
         val memoryDigest = buildMemoryDigest(sessionKey)
-        val persistentMemories = buildPersistentMemoryDigest()
+        val persistentMemories = buildPersistentMemoryDigest(text)
         val activePrompt = skillsLoader.activePrompt()
 
         val systemPrompt = SystemPromptBuilder.build(
@@ -112,6 +112,7 @@ class ToolCallAgentLoop @Inject constructor(
             messages.add(LlmMessage(role = "user", content = text))
         }
 
+        workspaceContext.onNewUserRequest(text)
         runAgentLoop(chatId, sessionKey, messages, toolDefs, emit)
     }
 
@@ -136,13 +137,20 @@ class ToolCallAgentLoop @Inject constructor(
                     ?: "I'm not sure how to help with that."
                 sessions.appendAssistantMessage(sessionKey, reply)
                 memoryFiles.appendHistoryLine("assistant: $reply")
+                workspaceContext.onAgentResponse(reply)
 
                 // --- C. Plan step tracking on text response ---
                 if (planManager.isExecuting(chatId)) {
                     val stepId = planManager.currentStepId(chatId)
                     if (stepId != null) {
+                        val stepText = planManager.currentSnapshot(chatId)
+                            ?.items?.firstOrNull { it.id == stepId }?.text ?: stepId
                         planManager.updateStepStatus(chatId, stepId, TodoStatus.COMPLETED)
                         planManager.advanceToNextStep(chatId)
+                        workspaceContext.onPlanStepCompleted(
+                            planSnapshot = planManager.currentSnapshot(chatId),
+                            stepText = stepText,
+                        )
                         emitPlanProgress(chatId, stepId, emit)
                     }
                 }
@@ -227,6 +235,7 @@ class ToolCallAgentLoop @Inject constructor(
                 emit(RuntimeEvent.ToolFinished(tc.name, tc.id, success = result.ok, summary = body.take(200)))
 
                 Log.d(TAG, "Tool ${tc.name} -> ${if (result.ok) "OK" else "FAIL"}: ${body.take(200)}")
+                workspaceContext.onToolResult(tc.name, result.message)
 
                 // --- B. Post-tool-call check: break on create_plan ---
                 if (tc.name == CreatePlanTool.NAME && result.ok) {
@@ -253,6 +262,7 @@ class ToolCallAgentLoop @Inject constructor(
         val fallback = "Stopped: too many tool call rounds. Please try a simpler request."
         sessions.appendAssistantMessage(sessionKey, fallback)
         memoryFiles.appendHistoryLine("assistant: $fallback")
+        workspaceContext.onAgentResponse(fallback)
         emit(RuntimeEvent.StateChanged("FAILED"))
         emit(RuntimeEvent.AssistantMessage(fallback))
     }
@@ -281,6 +291,10 @@ class ToolCallAgentLoop @Inject constructor(
                 emit(RuntimeEvent.StateChanged("THINKING"))
 
                 val toolDefs = toolRegistry.definitionsForLlm()
+                workspaceContext.resetContext(
+                    "Executing plan: ${pending.snapshot.title}. " +
+                        pending.snapshot.items.joinToString(" | ") { it.text }
+                )
                 runAgentLoop(chatId, sessionKey, restored, toolDefs, emit)
             }
             "edit_plan" -> {
@@ -302,12 +316,13 @@ class ToolCallAgentLoop @Inject constructor(
                 planManager.reject(chatId)
                 sessions.appendUserMessage(sessionKey, text)
                 memoryFiles.appendHistoryLine("user: $text")
+                workspaceContext.onNewUserRequest(text)
 
                 emit(RuntimeEvent.StateChanged("THINKING"))
 
                 val history = sessions.getMessages(sessionKey)
                 val memoryDigest = buildMemoryDigest(sessionKey)
-                val persistentMemories = buildPersistentMemoryDigest()
+                val persistentMemories = buildPersistentMemoryDigest(text)
                 val activePrompt = skillsLoader.activePrompt()
                 val systemPrompt = SystemPromptBuilder.build(
                     skillRegistry = skillRegistry,
@@ -373,23 +388,27 @@ class ToolCallAgentLoop @Inject constructor(
 
     private suspend fun buildMemoryDigest(sessionKey: String): String =
         withContext(Dispatchers.IO) {
+            val sb = StringBuilder()
+
             val md = memoryFiles.readMemoryMd().trim().take(2500)
-            val sum = memory.getSessionSummary(sessionKey)?.trim()?.take(1500).orEmpty()
-            buildString {
-                if (md.isNotEmpty()) {
-                    appendLine("## Long-term memory excerpt")
-                    appendLine(md)
-                }
-                if (sum.isNotEmpty()) {
-                    appendLine("## Session summary")
-                    appendLine(sum)
-                }
+            if (md.isNotEmpty()) {
+                sb.appendLine("## Workspace context")
+                sb.appendLine(md)
+                sb.appendLine()
             }
+
+            val history = memoryFiles.readHistoryTail(1500).trim()
+            if (history.isNotEmpty()) {
+                sb.appendLine("## Recent session history")
+                sb.appendLine(history)
+            }
+
+            sb.toString().trimEnd()
         }
 
-    private suspend fun buildPersistentMemoryDigest(): String =
+    private suspend fun buildPersistentMemoryDigest(query: String): String =
         withContext(Dispatchers.IO) {
-            val memories = persistentMemory.recallRelevant(query = "current user request", limit = 5)
+            val memories = persistentMemory.recallRelevant(query = query, limit = 5)
             if (memories.isEmpty()) return@withContext ""
 
             buildString {

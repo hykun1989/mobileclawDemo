@@ -3,37 +3,36 @@ package com.mobilebot.domain
 import com.mobilebot.domain.tools.CallServiceTool
 import com.mobilebot.domain.tools.CheckSubtaskTool
 import com.mobilebot.domain.tools.CopyToClipboardTool
-import com.mobilebot.domain.tools.CreateCalendarEventTool
-import com.mobilebot.domain.tools.CreateNotificationTool
 import com.mobilebot.domain.tools.CreatePlanTool
-import com.mobilebot.domain.tools.DeepLinkAppTool
-import com.mobilebot.domain.tools.DeleteMemoryTool
 import com.mobilebot.domain.tools.DialNumberTool
 import com.mobilebot.domain.tools.GetCurrentLocationTool
-import com.mobilebot.domain.tools.GetDeviceStateTool
 import com.mobilebot.domain.tools.ListNotificationsTool
-import com.mobilebot.domain.tools.OpenAppTool
 import com.mobilebot.domain.tools.OpenCameraTool
+import com.mobilebot.domain.tools.OpenAppTool
 import com.mobilebot.domain.tools.OpenMapTool
 import com.mobilebot.domain.tools.OpenSettingsTool
 import com.mobilebot.domain.tools.OpenUrlTool
-import com.mobilebot.domain.tools.PlayMediaTool
-import com.mobilebot.domain.tools.PublishFactTool
-import com.mobilebot.domain.tools.QueryCalendarTool
 import com.mobilebot.domain.tools.ReadSandboxFileTool
 import com.mobilebot.domain.tools.ReadUserProfileTool
-import com.mobilebot.domain.tools.RecallMemoriesTool
-import com.mobilebot.domain.tools.SaveMemoryTool
+import com.mobilebot.domain.tools.RecallFactsTool
+import com.mobilebot.domain.tools.RememberFactTool
 import com.mobilebot.domain.tools.SearchContactsTool
 import com.mobilebot.domain.tools.SendSmsTool
 import com.mobilebot.domain.tools.SetAlarmTool
 import com.mobilebot.domain.tools.SetTimerTool
 import com.mobilebot.domain.tools.ShareTextTool
-import com.mobilebot.domain.tools.SkillTool
+import com.mobilebot.domain.tools.PublishFactTool
 import com.mobilebot.domain.tools.SpawnSubtaskTool
+import com.mobilebot.domain.tools.CreateCalendarEventTool
+import com.mobilebot.domain.tools.CreateNotificationTool
+import com.mobilebot.domain.tools.DeepLinkAppTool
+import com.mobilebot.domain.tools.GetDeviceStateTool
+import com.mobilebot.domain.tools.PlayMediaTool
+import com.mobilebot.domain.tools.QueryCalendarTool
+import com.mobilebot.domain.tools.SkillTool
 import com.mobilebot.domain.tools.ToggleFlashlightTool
-import com.mobilebot.domain.tools.Tool
 import com.mobilebot.domain.tools.WriteSandboxFileTool
+import com.mobilebot.domain.tools.Tool
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -109,6 +108,14 @@ abstract class DomainToolModule {
 
     @Binds
     @IntoSet
+    abstract fun bindRecallFacts(tool: RecallFactsTool): Tool
+
+    @Binds
+    @IntoSet
+    abstract fun bindRememberFact(tool: RememberFactTool): Tool
+
+    @Binds
+    @IntoSet
     abstract fun bindOpenSettings(tool: OpenSettingsTool): Tool
 
     @Binds
@@ -162,16 +169,4 @@ abstract class DomainToolModule {
     @Binds
     @IntoSet
     abstract fun bindPlayMedia(tool: PlayMediaTool): Tool
-
-    @Binds
-    @IntoSet
-    abstract fun bindSaveMemory(tool: SaveMemoryTool): Tool
-
-    @Binds
-    @IntoSet
-    abstract fun bindRecallMemories(tool: RecallMemoriesTool): Tool
-
-    @Binds
-    @IntoSet
-    abstract fun bindDeleteMemory(tool: DeleteMemoryTool): Tool
 }

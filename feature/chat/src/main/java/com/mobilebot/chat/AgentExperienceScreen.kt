@@ -64,7 +64,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,6 +76,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun AgentExperienceScreen(
@@ -420,7 +425,7 @@ private fun ActionOptionBubble(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            animation = tween(durationMillis = 1450, easing = LinearEasing),
         ),
         label = "action_loading_phase",
     )
@@ -464,32 +469,195 @@ private fun Modifier.loadingActionBorder(
     } else {
         drawWithContent {
             drawContent()
-            val strokeWidth = 2.dp.toPx()
+            val strokeWidth = 1.35.dp.toPx()
             val radius = 24.dp.toPx()
-            val width = size.width
-            val height = size.height
+            val blue = Color(0xFF68C8FF)
+            val paleBlue = Color(0xFFAADFFF)
             drawRoundRect(
-                color = AgentWhite.copy(alpha = 0.42f),
+                color = blue.copy(alpha = 0.08f),
+                topLeft = Offset.Zero,
+                size = size,
+                cornerRadius = CornerRadius(radius, radius),
+                style = Stroke(width = 2.4.dp.toPx()),
+            )
+            drawRoundRect(
+                color = paleBlue.copy(alpha = 0.48f),
                 topLeft = Offset.Zero,
                 size = size,
                 cornerRadius = CornerRadius(radius, radius),
                 style = Stroke(width = strokeWidth),
             )
-            val perimeter = ((width + height) * 2f).coerceAtLeast(1f)
-            val distance = perimeter * phase
-            val center = when {
-                distance <= width -> Offset(distance, 0f)
-                distance <= width + height -> Offset(width, distance - width)
-                distance <= width * 2f + height -> Offset(width - (distance - width - height), height)
-                else -> Offset(0f, height - (distance - width * 2f - height))
-            }
-            drawCircle(
-                color = AgentWhite,
-                radius = 4.5.dp.toPx(),
-                center = center,
+            drawOrbitingBorderLight(
+                phase = phase,
+                cornerRadius = radius,
+                strokeWidth = strokeWidth,
+                color = blue,
+                highlight = AgentWhite,
             )
         }
     }
+
+private fun DrawScope.drawOrbitingBorderLight(
+    phase: Float,
+    cornerRadius: Float,
+    strokeWidth: Float,
+    color: Color,
+    highlight: Color,
+) {
+    val inset = strokeWidth / 2f
+    val perimeter = roundedRectPerimeter(
+        width = size.width,
+        height = size.height,
+        radius = cornerRadius,
+        inset = inset,
+    )
+    if (perimeter <= 1f) return
+
+    val headDistance = perimeter * phase
+    val trailLength = perimeter * 0.13f
+    val samples = 34
+    var previousPoint: Offset? = null
+    repeat(samples) { index ->
+        val progress = index / (samples - 1).toFloat()
+        val distance = positiveModulo(headDistance - trailLength * (1f - progress), perimeter)
+        val point = roundedRectPointAt(
+            distance = distance,
+            width = size.width,
+            height = size.height,
+            radius = cornerRadius,
+            inset = inset,
+        )
+        previousPoint?.let { previous ->
+            if (isNearby(previous, point)) {
+                drawLine(
+                    color = color.copy(alpha = 0.03f + progress * 0.08f),
+                    start = previous,
+                    end = point,
+                    strokeWidth = strokeWidth * 2.1f,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = color.copy(alpha = 0.16f + progress * 0.42f),
+                    start = previous,
+                    end = point,
+                    strokeWidth = strokeWidth * 0.9f,
+                    cap = StrokeCap.Round,
+                )
+                if (progress > 0.66f) {
+                    drawLine(
+                        color = highlight.copy(alpha = (progress - 0.66f) * 0.85f),
+                        start = previous,
+                        end = point,
+                        strokeWidth = strokeWidth * 0.32f,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+        }
+        previousPoint = point
+    }
+    val head = roundedRectPointAt(
+        distance = positiveModulo(headDistance, perimeter),
+        width = size.width,
+        height = size.height,
+        radius = cornerRadius,
+        inset = inset,
+    )
+    drawCircle(
+        color = color.copy(alpha = 0.10f),
+        radius = strokeWidth * 1.55f,
+        center = head,
+    )
+    drawCircle(
+        color = highlight.copy(alpha = 0.55f),
+        radius = strokeWidth * 0.38f,
+        center = head,
+    )
+}
+
+private fun DrawScope.isNearby(start: Offset, end: Offset): Boolean {
+    val dx = start.x - end.x
+    val dy = start.y - end.y
+    val maxStep = size.maxDimension * 0.18f
+    return dx * dx + dy * dy < maxStep * maxStep
+}
+
+private fun roundedRectPerimeter(
+    width: Float,
+    height: Float,
+    radius: Float,
+    inset: Float,
+): Float {
+    val left = inset
+    val top = inset
+    val right = width - inset
+    val bottom = height - inset
+    val r = radius
+        .coerceAtMost((right - left) / 2f)
+        .coerceAtMost((bottom - top) / 2f)
+        .coerceAtLeast(0f)
+    val horizontal = ((right - left) - 2f * r).coerceAtLeast(0f)
+    val vertical = ((bottom - top) - 2f * r).coerceAtLeast(0f)
+    return (2f * horizontal + 2f * vertical + 2f * PI.toFloat() * r).coerceAtLeast(0f)
+}
+
+private fun roundedRectPointAt(
+    distance: Float,
+    width: Float,
+    height: Float,
+    radius: Float,
+    inset: Float,
+): Offset {
+    val left = inset
+    val top = inset
+    val right = width - inset
+    val bottom = height - inset
+    val r = radius
+        .coerceAtMost((right - left) / 2f)
+        .coerceAtMost((bottom - top) / 2f)
+        .coerceAtLeast(0f)
+    val horizontal = ((right - left) - 2f * r).coerceAtLeast(0f)
+    val vertical = ((bottom - top) - 2f * r).coerceAtLeast(0f)
+    val arc = (PI.toFloat() * r / 2f).coerceAtLeast(0.0001f)
+    val perimeter = 2f * horizontal + 2f * vertical + 4f * arc
+    var remaining = positiveModulo(distance, perimeter)
+
+    if (remaining <= horizontal) return Offset(left + r + remaining, top)
+    remaining -= horizontal
+    if (remaining <= arc) return roundedCornerPoint(right - r, top + r, r, -PI.toFloat() / 2f, remaining / arc)
+    remaining -= arc
+
+    if (remaining <= vertical) return Offset(right, top + r + remaining)
+    remaining -= vertical
+    if (remaining <= arc) return roundedCornerPoint(right - r, bottom - r, r, 0f, remaining / arc)
+    remaining -= arc
+
+    if (remaining <= horizontal) return Offset(right - r - remaining, bottom)
+    remaining -= horizontal
+    if (remaining <= arc) return roundedCornerPoint(left + r, bottom - r, r, PI.toFloat() / 2f, remaining / arc)
+    remaining -= arc
+
+    if (remaining <= vertical) return Offset(left, bottom - r - remaining)
+    remaining -= vertical
+    return roundedCornerPoint(left + r, top + r, r, PI.toFloat(), remaining / arc)
+}
+
+private fun roundedCornerPoint(
+    centerX: Float,
+    centerY: Float,
+    radius: Float,
+    startAngle: Float,
+    progress: Float,
+): Offset {
+    val angle = startAngle + progress.coerceIn(0f, 1f) * PI.toFloat() / 2f
+    return Offset(
+        x = centerX + cos(angle) * radius,
+        y = centerY + sin(angle) * radius,
+    )
+}
+
+private fun positiveModulo(value: Float, modulus: Float): Float =
+    ((value % modulus) + modulus) % modulus
 @Composable
 private fun TaskProgressStrip(
     frame: AgentExperienceFrame,

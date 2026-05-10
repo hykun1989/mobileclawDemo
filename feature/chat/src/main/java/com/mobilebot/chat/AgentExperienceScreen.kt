@@ -496,6 +496,8 @@ private fun TaskProgressStrip(
     modifier: Modifier = Modifier,
 ) {
     val progress = frame.progressLine
+    val label = progressLabelText(progress.label)
+    val detail = progressDetailText(progress.detail)
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -512,14 +514,14 @@ private fun TaskProgressStrip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = progress.label,
+                text = label,
                 color = AgentWhite,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
             )
             Text(
-                text = progress.detail,
+                text = detail,
                 modifier = Modifier.weight(1f),
                 color = AgentMuted,
                 fontSize = 12.sp,
@@ -534,6 +536,68 @@ private fun TaskProgressStrip(
                 maxLines = 1,
             )
         }
+    }
+}
+
+private fun progressLabelText(value: String): String =
+    when (value.trim()) {
+        "Ready" -> "就绪"
+        "Starting" -> "启动中"
+        "Understanding" -> "处理中"
+        "Resuming" -> "继续中"
+        "Running" -> "进行中"
+        "Continuing" -> "继续中"
+        "Planning" -> "规划中"
+        "Executing", "EXECUTING_TOOL" -> "执行中"
+        "THINKING" -> "思考中"
+        "OBSERVING" -> "更新中"
+        "RESPONDING" -> "回复中"
+        "Waiting" -> "等待"
+        "Updated" -> "已更新"
+        "Complete" -> "已完成"
+        "Error", "Failed", "Needs attention" -> "需处理"
+        "Needs API key" -> "需配置"
+        else -> value
+    }
+
+private fun progressDetailText(value: String): String {
+    if (value.any { it in '\u4e00'..'\u9fff' }) return value
+    return when (value.trim()) {
+        "Ready" -> "就绪"
+        "Waiting for confirmation" -> "等待触发"
+        "Preparing the coordination flow" -> "正在准备协调流程"
+        "User decision required" -> "等待用户决策"
+        "Advancing to the next missing grooming milestone." -> "正在推进下一个任务节点"
+        "Waiting for matching SMS" -> "等待匹配短信"
+        "Loading coordination rules" -> "正在载入任务规则"
+        "Preparing the task plan" -> "正在生成任务计划"
+        "Using phone capability" -> "正在调用系统能力"
+        "Resolving contacts" -> "正在查找联系人"
+        "Sending SMS and starting listener" -> "正在发送短信并监听回复"
+        "Reading saved preferences" -> "正在读取偏好"
+        "Continuing the workflow" -> "正在继续任务"
+        "Continuing workflow" -> "正在继续任务"
+        "User profile loaded." -> "已读取用户资料"
+        "Kylin's service preferences loaded." -> "已读取麒麟洗护偏好"
+        "Home and frequent places loaded." -> "已读取常用地点"
+        "Trusted service relationships loaded." -> "已读取服务联系人"
+        "Relevant contacts checked." -> "已确认相关联系人"
+        "Message sent successfully." -> "消息已发送"
+        "Incoming service update received." -> "已收到服务更新"
+        "Location context resolved." -> "已确认位置信息"
+        "Service status retrieved." -> "已读取服务信息"
+        "Service request recorded." -> "服务请求已记录"
+        "Quiet progress update prepared." -> "提醒已准备"
+        "Phone call connected." -> "电话已接通"
+        "Call history checked." -> "通话记录已检查"
+        "Device state checked." -> "设备状态已检查"
+        "Payment completed." -> "支付已完成"
+        "Expense recorded." -> "账务已记录"
+        "The provider response could not be completed." -> "服务响应未完成"
+        "The run stopped after too many internal action rounds." -> "内部动作轮次过多，任务已暂停"
+        "The workflow needs manual review before continuing." -> "继续前需要人工检查"
+        "Configure the provider key in Settings before running." -> "请先在设置中配置 API Key"
+        else -> value
     }
 }
 

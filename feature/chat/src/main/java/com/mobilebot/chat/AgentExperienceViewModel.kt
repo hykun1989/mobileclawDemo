@@ -127,7 +127,7 @@ class AgentExperienceViewModel
                     AgentTaskLog(
                         id = nextId("task"),
                         timeText = blueprintTimeText(INITIAL_SCENARIO_CLOCK),
-                        text = "Creating Kylin daily care task.",
+                        text = "创建麒麟日常洗护任务。",
                     ),
                 ),
                 progressLine = AgentProgressLine(
@@ -518,10 +518,11 @@ class AgentExperienceViewModel
                             if (systemTool) appendSignal(base.systemSignals, systemSignalFromDeviceResult(content))
                             else base.systemSignals
                         val taskLog = taskLogFromToolResult(tool, content, ok, base.taskLogs.size)
+                        val partyLogs = partyTaskLogsFromToolResult(tool, content, ok, base.taskLogs)
                         val notification = if (systemTool && ok) notificationFromDeviceResult(content) else null
                         base.copy(
                             systemSignals = signals,
-                            taskLogs = taskLog?.let { appendTaskLog(base.taskLogs, it) } ?: base.taskLogs,
+                            taskLogs = appendTaskLogs(base.taskLogs, partyLogs + listOfNotNull(taskLog)),
                             systemNotification = notification ?: base.systemNotification,
                             progressLine = AgentProgressLine(
                                 label = if (ok) "Updated" else "Needs attention",
@@ -857,14 +858,14 @@ class AgentExperienceViewModel
 
         private fun toolStartEvent(tool: String): AgentTimelineEvent {
             val (title, detail) = when (tool) {
-                "use_skill" -> "Workflow selected" to "Loading pet grooming coordination rules."
-                "create_plan" -> "Planning started" to "Preparing the execution stages."
-                "device_system" -> "Context check started" to "Reading phone context and service state."
-                "system_search_contacts" -> "Contacts checked" to "Resolving the relevant parties."
-                "system_send_sms" -> "Message sent" to "Listening for the expected reply."
-                "system_wait_for_sms" -> "Listening for reply" to "Waiting for the matching SMS."
-                "read_user_profile" -> "Profile lookup started" to "Checking saved user preferences."
-                else -> "Agent action started" to "Continuing the workflow."
+                "use_skill" -> "流程已选择" to "加载麒麟洗护协调规则。"
+                "create_plan" -> "开始规划" to "准备执行阶段。"
+                "device_system" -> "检查上下文" to "读取手机上下文和服务状态。"
+                "system_search_contacts" -> "检查联系人" to "确认相关参与方。"
+                "system_send_sms" -> "发送短信" to "等待预期回复。"
+                "system_wait_for_sms" -> "监听短信" to "等待匹配短信。"
+                "read_user_profile" -> "读取偏好" to "检查已保存的用户偏好。"
+                else -> "继续执行" to "推进当前流程。"
             }
             return AgentTimelineEvent(
                 id = nextId("tool"),
@@ -876,14 +877,14 @@ class AgentExperienceViewModel
 
         private fun toolProgressDetail(tool: String): String =
             when (tool) {
-                "use_skill" -> "Loading coordination rules"
-                "create_plan" -> "Preparing the task plan"
-                "device_system" -> "Using phone capability"
-                "system_search_contacts" -> "Resolving contacts"
-                "system_send_sms" -> "Sending SMS and starting listener"
-                "system_wait_for_sms" -> "Waiting for matching SMS"
-                "read_user_profile" -> "Reading saved preferences"
-                else -> "Continuing the workflow"
+                "use_skill" -> "加载协调规则"
+                "create_plan" -> "准备任务计划"
+                "device_system" -> "调用手机能力"
+                "system_search_contacts" -> "确认联系人"
+                "system_send_sms" -> "发送短信并启动监听"
+                "system_wait_for_sms" -> "等待匹配短信"
+                "read_user_profile" -> "读取已保存偏好"
+                else -> "继续推进流程"
             }
 
         private fun toolResultEvent(
@@ -892,18 +893,18 @@ class AgentExperienceViewModel
             ok: Boolean,
         ): AgentTimelineEvent {
             val detail = when (tool) {
-                "use_skill" -> "Pet grooming coordination rules are active."
-                "create_plan" -> "Execution stages are shown in the plan section."
+                "use_skill" -> "麒麟洗护协调规则已启用。"
+                "create_plan" -> "执行阶段已更新。"
                 "device_system" -> systemSignalFromDeviceResult(content)
                 "system_search_contacts" -> systemSignalFromDeviceResult(content)
                 "system_send_sms" -> systemSignalFromDeviceResult(content)
                 "system_wait_for_sms" -> systemSignalFromDeviceResult(content)
-                "read_user_profile" -> "Saved user profile has been checked."
-                else -> content.substringBefore('\n').take(180).ifBlank { "Action completed." }
+                "read_user_profile" -> "已检查用户资料。"
+                else -> content.substringBefore('\n').take(180).ifBlank { "操作已完成。" }
             }
             return AgentTimelineEvent(
                 id = nextId("tool"),
-                title = if (ok) actionCompleteTitle(tool) else "Action needs attention",
+                title = if (ok) actionCompleteTitle(tool) else "需要处理",
                 detail = detail,
                 status = if (ok) AgentTimelineStatus.DONE else AgentTimelineStatus.FAILED,
             )
@@ -911,42 +912,43 @@ class AgentExperienceViewModel
 
         private fun actionCompleteTitle(tool: String): String =
             when (tool) {
-                "use_skill" -> "Workflow ready"
-                "create_plan" -> "Plan ready"
-                "device_system" -> "Context updated"
-                "system_search_contacts" -> "Contacts resolved"
-                "system_send_sms" -> "SMS sent"
-                "system_wait_for_sms" -> "SMS received"
-                "read_user_profile" -> "Profile checked"
-                else -> "Action completed"
+                "use_skill" -> "流程就绪"
+                "create_plan" -> "计划就绪"
+                "device_system" -> "上下文已更新"
+                "system_search_contacts" -> "联系人已确认"
+                "system_send_sms" -> "短信已发送"
+                "system_wait_for_sms" -> "短信已收到"
+                "read_user_profile" -> "资料已检查"
+                else -> "操作已完成"
             }
 
         private fun systemSignalFromDeviceResult(content: String): String {
             val message = content.substringBefore('\n').trim()
             return when {
                 message.startsWith("Memory returned", ignoreCase = true) -> memorySignal(content)
-                message.startsWith("Contacts returned", ignoreCase = true) -> "Relevant contacts checked."
-                message.startsWith("SMS sent", ignoreCase = true) -> "Message sent successfully."
-                message.startsWith("Inbound SMS received", ignoreCase = true) -> "Incoming service update received."
-                message.startsWith("Location resolved", ignoreCase = true) -> "Location context resolved."
-                message.startsWith("Service gateway response", ignoreCase = true) -> "Service status retrieved."
-                message.startsWith("Service gateway echo", ignoreCase = true) -> "Service request recorded."
-                message.startsWith("Notification posted", ignoreCase = true) -> "Quiet progress update prepared."
-                message.startsWith("Phone call connected", ignoreCase = true) -> "Phone call connected."
-                message.startsWith("Call log returned", ignoreCase = true) -> "Call history checked."
-                message.startsWith("Device state returned", ignoreCase = true) -> "Device state checked."
-                message.startsWith("Payment completed", ignoreCase = true) -> "Payment completed."
-                message.startsWith("Expense recorded", ignoreCase = true) -> "Expense recorded."
-                else -> "Device context updated."
+                message.startsWith("Contacts returned", ignoreCase = true) -> "相关联系人已确认。"
+                message.startsWith("SMS sent", ignoreCase = true) -> "短信已发送。"
+                message.startsWith("Inbound SMS received", ignoreCase = true) -> "收到新的服务回复。"
+                message.startsWith("Location resolved", ignoreCase = true) -> "位置上下文已确认。"
+                message.startsWith("Service response", ignoreCase = true) ||
+                    message.startsWith("Service gateway response", ignoreCase = true) -> "服务信息已更新。"
+                message.startsWith("Service gateway echo", ignoreCase = true) -> "服务请求已记录。"
+                message.startsWith("Notification posted", ignoreCase = true) -> "提醒已设置。"
+                message.startsWith("Phone call connected", ignoreCase = true) -> "电话已接通。"
+                message.startsWith("Call log returned", ignoreCase = true) -> "通话记录已检查。"
+                message.startsWith("Device state returned", ignoreCase = true) -> "设备状态已检查。"
+                message.startsWith("Payment completed", ignoreCase = true) -> "支付已完成。"
+                message.startsWith("Expense recorded", ignoreCase = true) -> "记账已完成。"
+                else -> "上下文已更新。"
             }
         }
 
         private fun memorySignal(content: String): String =
             when {
-                content.contains("\"key\":\"memory\"", ignoreCase = true) -> "Kylin's service preferences loaded."
-                content.contains("\"key\":\"places\"", ignoreCase = true) -> "Home and frequent places loaded."
-                content.contains("\"key\":\"social\"", ignoreCase = true) -> "Trusted service relationships loaded."
-                else -> "User profile loaded."
+                content.contains("\"key\":\"memory\"", ignoreCase = true) -> "麒麟服务偏好已加载。"
+                content.contains("\"key\":\"places\"", ignoreCase = true) -> "家庭和常用地点已加载。"
+                content.contains("\"key\":\"social\"", ignoreCase = true) -> "可信服务关系已加载。"
+                else -> "用户资料已加载。"
             }
 
         private fun taskLogFromToolResult(
@@ -959,7 +961,7 @@ class AgentExperienceViewModel
                 return AgentTaskLog(
                     id = nextId("task"),
                     timeText = taskLogTimeFor(tool, content, eventIndex),
-                    text = "Action needs attention: ${content.substringBefore('\n').take(140)}",
+                    text = "操作需要处理：${content.substringBefore('\n').take(140)}",
                 )
             }
             return when (tool) {
@@ -983,49 +985,50 @@ class AgentExperienceViewModel
                 message.startsWith("Memory returned", ignoreCase = true) -> return null
                 message.startsWith("Contacts returned", ignoreCase = true) -> {
                     val names = contactNamesFromData(data)
-                    if (names.isBlank()) "Added relevant contacts to Parties." else "Added $names to Parties."
+                    if (names.isBlank()) "添加相关联系人到参与方。" else "添加 $names 到参与方。"
                 }
                 message.startsWith("SMS sent", ignoreCase = true) -> {
                     val sms = data?.optJSONObject("sms")
                     val to = sms?.optString("displayName").orEmpty()
                         .ifBlank { sms?.optString("to").orEmpty() }
                         .ifBlank { data?.optJSONObject("listener")?.optString("contact").orEmpty() }
-                        .ifBlank { "contact" }
+                        .ifBlank { "联系人" }
                     val body = sms?.optString("message").orEmpty()
-                    "Sent SMS to $to${body.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()}"
+                    "发送短信给 $to${body.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()}"
                 }
                 message.startsWith("Inbound SMS received", ignoreCase = true) -> {
                     val sms = data?.optJSONObject("sms")
                     val from = sms?.optString("displayName").orEmpty()
                         .ifBlank { sms?.optString("from").orEmpty() }
                         .ifBlank { data?.optJSONObject("listener")?.optString("contact").orEmpty() }
-                        .ifBlank { "contact" }
+                        .ifBlank { "联系人" }
                     val body = sms?.optString("message").orEmpty()
-                    "Received SMS from $from${body.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()}"
+                    "收到 $from 的短信${body.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()}"
                 }
                 message.startsWith("Notification posted", ignoreCase = true) -> {
                     val notification = data?.optJSONObject("notification")
                     val title = notification?.optString("title").orEmpty().ifBlank { "Reminder" }
                     val body = notification?.optString("body").orEmpty()
-                    "Created reminder: $title${body.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()}"
+                    "设置提醒：$title${body.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()}"
                 }
                 message.startsWith("Phone call connected", ignoreCase = true) -> message
                 message.startsWith("Call log returned", ignoreCase = true) -> return null
                 message.startsWith("Location resolved", ignoreCase = true) -> return null
-                message.startsWith("Service gateway response", ignoreCase = true) -> "Received service status."
-                message.startsWith("Service gateway echo", ignoreCase = true) -> "Recorded service request."
+                message.startsWith("Service response", ignoreCase = true) ||
+                    message.startsWith("Service gateway response", ignoreCase = true) -> serviceTaskLogText(data)
+                message.startsWith("Service gateway echo", ignoreCase = true) -> "记录服务请求。"
                 message.startsWith("Device state returned", ignoreCase = true) -> return null
                 message.startsWith("Payment completed", ignoreCase = true) -> {
                     val payment = data?.optJSONObject("payment")
-                    val recipient = payment?.optString("recipient").orEmpty().ifBlank { "service provider" }
-                    val amount = payment?.optString("amount").orEmpty().ifBlank { "confirmed amount" }
-                    "Paid $recipient: $amount."
+                    val recipient = payment?.optString("recipient").orEmpty().ifBlank { "服务方" }
+                    val amount = payment?.optString("amount").orEmpty().ifBlank { "已确认金额" }
+                    "向 $recipient 支付：$amount。"
                 }
                 message.startsWith("Expense recorded", ignoreCase = true) -> {
                     val expense = data?.optJSONObject("expense")
-                    val merchant = expense?.optString("merchant").orEmpty().ifBlank { "service provider" }
-                    val amount = expense?.optString("amount").orEmpty().ifBlank { "confirmed amount" }
-                    "Recorded expense for $merchant: $amount."
+                    val merchant = expense?.optString("merchant").orEmpty().ifBlank { "服务方" }
+                    val amount = expense?.optString("amount").orEmpty().ifBlank { "已确认金额" }
+                    "完成记账：$merchant $amount。"
                 }
                 else -> return null
             }
@@ -1053,6 +1056,21 @@ class AgentExperienceViewModel
                 if (minute < 60) "04/25 18:${minute.toString().padStart(2, '0')}" else "04/26 20:01"
             }
 
+        private fun serviceTaskLogText(data: JSONObject?): String {
+            val serviceId = data?.optString("serviceId").orEmpty()
+            val action = data?.optString("action").orEmpty()
+            return when {
+                serviceId == "pet_salon_search" && action.contains("detail", ignoreCase = true) ->
+                    "查询 PetSmart 联系方式、服务项目和公开价格。"
+                serviceId == "pet_salon_search" ->
+                    "查询 PetSmart 服务信息。"
+                serviceId.isNotBlank() ->
+                    "获取 $serviceId 服务信息。"
+                else ->
+                    "获取服务信息。"
+            }
+        }
+
         private fun contactNamesFromData(data: JSONObject?): String {
             val contacts = data?.optJSONArray("contacts") ?: return ""
             return buildList {
@@ -1062,7 +1080,36 @@ class AgentExperienceViewModel
                         .ifBlank { contact.optString("name") }
                     if (name.isNotBlank()) add(name)
                 }
-            }.distinct().joinToString(", ")
+            }.distinct().joinToString("、")
+        }
+
+        private fun partyTaskLogsFromToolResult(
+            tool: String,
+            content: String,
+            ok: Boolean,
+            existing: List<AgentTaskLog>,
+        ): List<AgentTaskLog> {
+            if (!ok || tool !in setOf("system_send_sms", "system_wait_for_sms")) return emptyList()
+            val data = parseToolData(content) ?: return emptyList()
+            val sms = data.optJSONObject("sms") ?: return emptyList()
+            val contact = sms.optString("displayName").ifBlank {
+                sms.optString("to").ifBlank { sms.optString("from") }
+            }
+            val party = when {
+                contact.equals("PetSmart", ignoreCase = true) -> "PetSmart"
+                contact.equals("Driver", ignoreCase = true) -> "Driver"
+                else -> return emptyList()
+            }
+            if (existing.any { it.text.contains("添加") && it.text.contains(party) && it.text.contains("参与方") }) {
+                return emptyList()
+            }
+            return listOf(
+                AgentTaskLog(
+                    id = nextId("task"),
+                    timeText = taskLogTimeFor(tool, content, existing.size),
+                    text = "添加 $party 到参与方。",
+                ),
+            )
         }
 
         private fun notificationFromDeviceResult(content: String): AgentSystemNotification? {
@@ -1099,13 +1146,28 @@ class AgentExperienceViewModel
             val data = parseToolData(content)
             val sms = data?.optJSONObject("sms")
             val smsBody = sms?.optString("message").orEmpty()
+            val smsEventType = sms?.optString("eventType").orEmpty()
             val contact = sms?.optString("displayName").orEmpty()
                 .ifBlank { sms?.optString("from").orEmpty() }
                 .ifBlank { sms?.optString("to").orEmpty() }
+            val serviceId = data?.optString("serviceId").orEmpty()
+            val serviceAction = data?.optString("action").orEmpty()
 
             return when {
-                message.startsWith("Contacts returned", ignoreCase = true) ->
-                    LocalDateTime.of(2027, 4, 25, 13, 3)
+                message.startsWith("Service response", ignoreCase = true) && serviceId == "pet_salon_search" ->
+                    if (serviceAction.contains("detail", ignoreCase = true)) {
+                        LocalDateTime.of(2027, 4, 25, 13, 1)
+                    } else {
+                        LocalDateTime.of(2027, 4, 25, 13, 1)
+                    }
+                message.startsWith("Contacts returned", ignoreCase = true) -> {
+                    val names = contactNamesFromData(data)
+                    if (names.contains("Driver")) {
+                        LocalDateTime.of(2027, 4, 25, 13, 5)
+                    } else {
+                        LocalDateTime.of(2027, 4, 25, 13, 3)
+                    }
+                }
                 message.startsWith("Payment completed", ignoreCase = true) ->
                     LocalDateTime.of(2027, 4, 26, 20, 0)
                 message.startsWith("Expense recorded", ignoreCase = true) ->
@@ -1113,7 +1175,7 @@ class AgentExperienceViewModel
                 message.startsWith("SMS sent", ignoreCase = true) ->
                     scenarioClockForOutboundSms(contact, smsBody)
                 message.startsWith("Inbound SMS received", ignoreCase = true) ->
-                    scenarioClockForInboundSms(contact, smsBody)
+                    scenarioClockForInboundSms(contact, smsBody, smsEventType)
                 else -> null
             }
         }
@@ -1123,8 +1185,13 @@ class AgentExperienceViewModel
             body: String,
         ): LocalDateTime? =
             when {
+                contact.contains("PetSmart", ignoreCase = true) &&
+                    (body.contains("确认预约") || body.contains("确认约") || body.contains("确认周日") || body.contains("确认本周日")) ->
+                    LocalDateTime.of(2027, 4, 25, 13, 4)
                 contact.contains("PetSmart", ignoreCase = true) && body.contains("9:00") ->
                     LocalDateTime.of(2027, 4, 25, 13, 2)
+                contact.contains("PetSmart", ignoreCase = true) && (body.contains("下午") || body.contains("5点")) ->
+                    LocalDateTime.of(2027, 4, 25, 13, 4)
                 contact.contains("Driver", ignoreCase = true) && body.contains("8:30") ->
                     LocalDateTime.of(2027, 4, 25, 13, 5)
                 contact.contains("Driver", ignoreCase = true) && (body.contains("19:20") || body.contains("七点二十")) ->
@@ -1137,8 +1204,29 @@ class AgentExperienceViewModel
         private fun scenarioClockForInboundSms(
             contact: String,
             body: String,
+            eventType: String,
         ): LocalDateTime? =
             when {
+                eventType == "petsmart_availability_options" ->
+                    LocalDateTime.of(2027, 4, 25, 13, 3)
+                eventType == "petsmart_booking_confirmed" ->
+                    LocalDateTime.of(2027, 4, 25, 13, 4)
+                eventType == "petsmart_arrival_confirmed" ->
+                    LocalDateTime.of(2027, 4, 26, 9, 0)
+                eventType == "petsmart_delayed_pickup" ->
+                    LocalDateTime.of(2027, 4, 26, 16, 30)
+                eventType == "petsmart_grooming_finished" ->
+                    LocalDateTime.of(2027, 4, 26, 19, 20)
+                eventType == "driver_home_pickup_confirmed" ->
+                    LocalDateTime.of(2027, 4, 25, 13, 6)
+                eventType == "driver_delivered_to_petsmart" ->
+                    LocalDateTime.of(2027, 4, 26, 9, 0)
+                eventType == "driver_return_pickup_confirmed" ->
+                    LocalDateTime.of(2027, 4, 26, 19, 20)
+                eventType == "driver_return_eta" ->
+                    LocalDateTime.of(2027, 4, 26, 19, 35)
+                eventType == "driver_home_arrival" ->
+                    LocalDateTime.of(2027, 4, 26, 20, 0)
                 contact.contains("PetSmart", ignoreCase = true) &&
                     (body.contains("上午九点") || body.contains("上午9点") || body.contains("9点")) ->
                     LocalDateTime.of(2027, 4, 25, 13, 3)
@@ -1422,15 +1510,19 @@ class AgentExperienceViewModel
             )
         }
 
-        private fun appendTaskLog(
+        private fun appendTaskLogs(
             existing: List<AgentTaskLog>,
-            value: AgentTaskLog,
-        ): List<AgentTaskLog> =
-            if (existing.lastOrNull()?.text == value.text) {
-                existing
-            } else {
-                (existing + value).takeLast(MAX_TASK_LOGS)
+            values: List<AgentTaskLog>,
+        ): List<AgentTaskLog> {
+            if (values.isEmpty()) return existing
+            return values.fold(existing) { rows, value ->
+                if (rows.lastOrNull()?.text == value.text || rows.any { it.text == value.text && it.timeText == value.timeText }) {
+                    rows
+                } else {
+                    (rows + value).takeLast(MAX_TASK_LOGS)
+                }
             }
+        }
 
         private fun appendTrace(existing: List<String>, value: String): List<String> =
             (existing + value).takeLast(MAX_TRACE_LINES)

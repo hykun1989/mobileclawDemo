@@ -260,7 +260,7 @@ private fun BlueprintDeck(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Kylin Daily Care",
+                        text = "麒麟日常洗护",
                         color = AgentWhite,
                         fontSize = 22.sp,
                         lineHeight = 26.sp,
@@ -268,7 +268,7 @@ private fun BlueprintDeck(
                         maxLines = 1,
                     )
                     Text(
-                        text = "Live Task Blueprint",
+                        text = "任务蓝图",
                         color = AgentWhite.copy(alpha = 0.72f),
                         fontSize = 12.sp,
                         lineHeight = 15.sp,
@@ -284,7 +284,7 @@ private fun BlueprintDeck(
             }
             if (frame.taskLogs.isEmpty()) {
                 Text(
-                    text = "Waiting for task activity.",
+                    text = "等待任务推进。",
                     color = AgentWhite.copy(alpha = 0.62f),
                     fontSize = 12.sp,
                     lineHeight = 16.sp,

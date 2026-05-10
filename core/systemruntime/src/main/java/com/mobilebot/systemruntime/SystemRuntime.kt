@@ -88,14 +88,16 @@ class SystemRuntime
             }
             delay(Random.nextLong(SMS_MIN_DELAY_MS, SMS_MAX_DELAY_MS + 1))
             val reply = generateSmsReply(watch)
-            val item = mapOf(
+            val item = linkedMapOf<String, Any?>(
                 "id" to "sms-in-${System.currentTimeMillis()}",
                 "from" to watch.contact,
                 "displayName" to watch.contact,
                 "message" to reply.message,
                 "receivedAt" to System.currentTimeMillis(),
                 "matchedWatchId" to watch.id,
-            )
+            ).apply {
+                if (!reply.eventType.isNullOrBlank()) put("eventType", reply.eventType)
+            }
             synchronized(smsLock) {
                 smsInbox += item
                 smsWatches.remove(watch.id)
@@ -563,6 +565,7 @@ class SystemRuntime
             return SmsReply(
                 message = rule?.let { renderSmsReply(it, outbound) } ?: "收到，我会继续更新。",
                 decisionPrompt = rule?.decisionPrompt,
+                eventType = rule?.eventType,
             )
         }
 
@@ -767,6 +770,7 @@ class SystemRuntime
             val excludeKeywords: List<String>,
             val reply: String,
             val decisionPrompt: RuntimeDecisionPrompt?,
+            val eventType: String?,
         ) {
             fun matches(
                 contact: String,
@@ -831,6 +835,7 @@ class SystemRuntime
         private data class SmsReply(
             val message: String,
             val decisionPrompt: RuntimeDecisionPrompt?,
+            val eventType: String?,
         )
 
         private data class RuntimeDecisionPrompt(
@@ -953,6 +958,7 @@ class SystemRuntime
                             excludeKeywords = obj.optStringList("excludeKeywords"),
                             reply = reply,
                             decisionPrompt = parseDecisionPrompt(obj.optJSONObject("decisionPrompt")),
+                            eventType = obj.optString("eventType").trim().takeIf { it.isNotBlank() },
                         ),
                     )
                 }

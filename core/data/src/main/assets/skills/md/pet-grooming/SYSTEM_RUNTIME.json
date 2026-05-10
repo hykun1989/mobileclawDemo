@@ -139,6 +139,7 @@
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "keywords": ["availability", "available", "slot", "time", "appointment", "sunday", "tomorrow", "档期", "有空", "空位", "预约", "周日", "明天"],
       "excludeKeywords": ["booking confirmation", "confirm the booking", "confirm booking", "confirming", "confirmed", "book the", "book kylin", "kylin booked", "we'll take", "take the", "arrival", "arrived", "progress", "delay", "finish", "finished", "ready", "pickup", "status update", "确认预约", "确认明天", "确认本周日", "确认周日", "确认9点", "确认上午9点", "到店", "到达", "进度", "延迟", "完成", "洗完", "接回"],
+      "eventType": "petsmart_availability_options",
       "reply": "两点约满了，上午九点可以；下午五点以后也可以，但时间只够洗澡，不能做除毛。",
       "decisionPrompt": {
         "prompt": "PetSmart说明天上午9点可以洗澡和除毛，下午5点后只够洗澡。要约9点吗？",
@@ -161,63 +162,75 @@
     {
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "keywords": ["booking confirmation", "confirming", "confirm the booking", "confirm booking", "confirmed", "book the", "book kylin", "kylin booked", "预约确认", "确认预约", "确认明天", "确认本周日", "确认周日", "确认9点", "确认上午9点"],
+      "eventType": "petsmart_booking_confirmed",
       "reply": "好的，Kylin 的洗护预约已确认，上午九点开始。"
     },
     {
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "keywords": ["after 5", "5 pm", "five", "bath only", "下午五", "5点", "只洗澡"],
+      "eventType": "petsmart_afternoon_bath_only",
       "reply": "好的，那就下午五点，只洗澡。"
     },
     {
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "keywords": ["arrived", "delivered", "drop off", "送到", "到店"],
+      "eventType": "petsmart_arrival_confirmed",
       "reply": "Kylin 已经到店。"
     },
     {
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "keywords": ["progress", "delay", "status", "进度", "延迟", "晚一点"],
+      "eventType": "petsmart_delayed_pickup",
       "reply": "前面的客人还没洗完，Kylin 要晚一点开始，七点二十（19:20）来接吧。"
     },
     {
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "keywords": ["finished", "ready", "pickup", "pick up", "complete", "洗完", "接"],
+      "eventType": "petsmart_grooming_finished",
       "reply": "Kylin 洗完了，可以接了。"
     },
     {
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "keywords": [],
+      "eventType": "petsmart_generic_update",
       "reply": "收到，Kylin 的预约信息我们会继续更新。"
     },
     {
       "contactAliases": ["Driver", "Lee's driver", "private driver", "trusted driver", "司机"],
       "keywords": ["home now", "arrived home", "home confirmation", "driver home confirmation", "arrived back home", "到家", "已到家", "到家确认", "送回家"],
       "excludeKeywords": ["到家接", "到家接宠", "到家接kylin", "home pickup"],
+      "eventType": "driver_home_arrival",
       "reply": "我到了，Kylin 已经到家了。"
     },
     {
       "contactAliases": ["Driver", "Lee's driver", "private driver", "trusted driver", "司机"],
       "keywords": ["19:20", "7:20", "七点二十", "7点20", "pickup from petsmart", "pick up kylin at petsmart", "去接", "接回来"],
+      "eventType": "driver_return_pickup_confirmed",
       "reply": "收到，我{pickup_time}去 PetSmart 接 Kylin。"
     },
     {
       "contactAliases": ["Driver", "Lee's driver", "private driver", "trusted driver", "司机"],
       "keywords": ["delivery-to-petsmart", "delivered", "arrived at", "drop off", "送到", "送达", "已送达", "到店", "抵达"],
       "excludeKeywords": ["8:30", "请到家", "上门接", "接麒麟", "接 Kylin", "接kylin", "到家接"],
+      "eventType": "driver_delivered_to_petsmart",
       "reply": "Kylin 送到了。"
     },
     {
       "contactAliases": ["Driver", "Lee's driver", "private driver", "trusted driver", "司机"],
       "keywords": ["pickup", "pick up", "come get", "接", "楼下"],
+      "eventType": "driver_home_pickup_confirmed",
       "reply": "收到，我{pickup_time}来接 Kylin，9:00 前送到 PetSmart。"
     },
     {
       "contactAliases": ["Driver", "Lee's driver", "private driver", "trusted driver", "司机"],
       "keywords": ["return", "bring", "on the way", "回家", "送回"],
+      "eventType": "driver_return_eta",
       "reply": "Kylin 在回家路上了，预计{first_time}到。"
     },
     {
       "contactAliases": ["Driver", "Lee's driver", "private driver", "trusted driver", "司机"],
       "keywords": [],
+      "eventType": "driver_generic_update",
       "reply": "收到，我会继续更新。"
     }
   ]

@@ -34,12 +34,15 @@ class AgentExperienceViewModel
         private val agent: AgentLoop,
         private val settings: UserSettingsRepository,
         private val foreground: ForegroundController,
+        private val decisionIntentNormalizer: ScenarioDecisionIntentNormalizer,
     ) : ViewModel() {
         private var currentChatId: String? = null
         private var eventCounter = 0
         private var continuationCount = 0
         private var scenarioClock = INITIAL_SCENARIO_CLOCK
         private var deferredRetriggerInProgress = false
+        private var latestScenarioDecisionIntent: ScenarioDecisionIntent? = null
+        private val groomingMilestones = mutableSetOf<GroomingMilestone>()
 
         private val scenario = AgentScenarioConfig(
             scenarioId = "pet-grooming",
@@ -99,6 +102,8 @@ class AgentExperienceViewModel
             currentChatId = runChatId
             eventCounter = 0
             continuationCount = 0
+            latestScenarioDecisionIntent = null
+            groomingMilestones.clear()
             val triggerText = buildScenarioTriggerText(scenarioClock)
             val baseFrame = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
             val openingItems =
@@ -146,35 +151,11 @@ class AgentExperienceViewModel
         fun chooseDecision(action: ActionButton) {
             val chatId = currentChatId ?: return
             if (_frame.value.busy) return
-            continuationCount = 0
-            _frame.update {
-                it.copy(
-                    statusLabel = "Resuming",
-                    busy = true,
-                    decisionPrompt = null,
-                    conversationItems = appendConversation(
-                        it.conversationItems,
-                        AgentConversationRole.USER,
-                        action.label,
-                    ),
-                    progressLine = AgentProgressLine(
-                        label = "Resuming",
-                        detail = action.label,
-                        completed = completedStageCount(it),
-                        total = totalStageCount(it),
-                    ),
-                    timeline = it.timeline + AgentTimelineEvent(
-                        id = nextId("decision"),
-                        title = "Decision received",
-                        detail = action.label,
-                        status = AgentTimelineStatus.DONE,
-                    ),
-                    debugTrace = appendTrace(it.debugTrace, "user decision -> ${action.value}"),
-                )
-            }
-            viewModelScope.launch {
-                runAgentTurn(chatId, action.value)
-            }
+            continueWithNormalizedDecision(
+                chatId = chatId,
+                displayText = action.label,
+                rawText = action.value,
+            )
         }
 
         fun submitDecisionText(text: String) {
@@ -182,34 +163,70 @@ class AgentExperienceViewModel
             if (value.isBlank()) return
             val chatId = currentChatId ?: return
             if (_frame.value.busy) return
+            continueWithNormalizedDecision(
+                chatId = chatId,
+                displayText = value,
+                rawText = value,
+            )
+        }
+
+        private fun continueWithNormalizedDecision(
+            chatId: String,
+            displayText: String,
+            rawText: String,
+        ) {
+            val prompt = _frame.value.decisionPrompt
             continuationCount = 0
             _frame.update {
                 it.copy(
-                    statusLabel = "Resuming",
+                    statusLabel = "Understanding",
                     busy = true,
                     decisionPrompt = null,
                     conversationItems = appendConversation(
                         it.conversationItems,
                         AgentConversationRole.USER,
-                        value,
+                        displayText,
                     ),
                     progressLine = AgentProgressLine(
-                        label = "Resuming",
-                        detail = value,
+                        label = "Understanding",
+                        detail = displayText,
                         completed = completedStageCount(it),
                         total = totalStageCount(it),
                     ),
                     timeline = it.timeline + AgentTimelineEvent(
                         id = nextId("decision"),
                         title = "Decision received",
-                        detail = value,
+                        detail = displayText,
                         status = AgentTimelineStatus.DONE,
                     ),
-                    debugTrace = appendTrace(it.debugTrace, "user input -> ${value.take(160)}"),
+                    debugTrace = appendTrace(it.debugTrace, "user decision -> ${rawText.take(160)}"),
                 )
             }
             viewModelScope.launch {
-                runAgentTurn(chatId, value)
+                val normalized = decisionIntentNormalizer.normalize(
+                    ScenarioDecisionInput(
+                        scenarioId = scenario.scenarioId,
+                        promptText = prompt?.text.orEmpty(),
+                        presentedActions = prompt?.actions.orEmpty(),
+                        displayText = displayText,
+                        rawText = rawText,
+                    ),
+                )
+                latestScenarioDecisionIntent = normalized.intent
+                _frame.update {
+                    it.copy(
+                        statusLabel = "Resuming",
+                        progressLine = it.progressLine.copy(
+                            label = "Resuming",
+                            detail = displayText,
+                        ),
+                        debugTrace = appendTrace(
+                            it.debugTrace,
+                            "normalized intent -> ${normalized.intent.id}${if (normalized.usedFallback) " (fallback)" else ""}",
+                        ),
+                    )
+                }
+                runAgentTurn(chatId, normalized.agentText)
             }
         }
 
@@ -361,30 +378,9 @@ class AgentExperienceViewModel
         }
 
         private fun groomingDeferred(frame: AgentExperienceFrame): Boolean {
-            val latestUserDecision = frame.conversationItems
-                .lastOrNull { it.role == AgentConversationRole.USER }
-                ?.text
-                ?.lowercase()
-                .orEmpty()
-            val finalText = frame.finalSummary.orEmpty().lowercase()
-            val userDeferred = latestUserDecision.containsDeferredIntent()
-            val assistantDeferred =
-                finalText.contains("deferred") ||
-                    finalText.contains("skip this week") ||
-                    finalText.contains("postponed") ||
-                    finalText.contains("下周再说") ||
-                    finalText.contains("本周先不") ||
-                    finalText.contains("本周不安排")
-            return userDeferred || assistantDeferred
+            if (frame.scenario.scenarioId != "pet-grooming") return false
+            return latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingDeferCurrentWeek
         }
-
-        private fun String.containsDeferredIntent(): Boolean =
-            contains("defer") ||
-                contains("skip this week") ||
-                contains("next week") ||
-                contains("postpone") ||
-                contains("改天") ||
-                contains("下周")
 
         private fun shouldScheduleDeferredRetrigger(frame: AgentExperienceFrame): Boolean =
             frame.scenario.scenarioId == "pet-grooming" &&
@@ -400,6 +396,8 @@ class AgentExperienceViewModel
                 val nextClock = scenarioClock.plusDays(7).withHour(13).withMinute(0).withSecond(0).withNano(0)
                 advanceClockTo(nextClock)
                 scenarioClock = nextClock
+                latestScenarioDecisionIntent = null
+                groomingMilestones.clear()
                 _frame.value = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
                 deferredRetriggerInProgress = false
                 delay(AUTO_TRIGGER_DELAY_MS)
@@ -439,41 +437,22 @@ class AgentExperienceViewModel
         }
 
         private fun groomingClosureSatisfied(frame: AgentExperienceFrame): Boolean {
-            val text = workflowText(frame)
-            val homeConfirmed =
-                text.contains("confirmed home") ||
-                    text.contains("arrived home") ||
-                    text.contains("kylin is home") ||
-                    text.contains("kylin has returned home") ||
-                    text.contains("已经到家") ||
-                    text.contains("到家了")
-            val paymentCompleted =
-                text.contains("payment completed") ||
-                    text.contains("payment is complete") ||
-                    text.contains("paid petsmart") ||
-                    text.contains("paid service provider") ||
-                    text.contains("已支付")
-            val expenseRecorded =
-                text.contains("expense recorded") ||
-                    text.contains("recorded expense") ||
-                    text.contains("accounting completed") ||
-                    text.contains("记账完成") ||
-                    text.contains("已记账") ||
-                    text.contains("已完成记账") ||
-                    text.contains("费用已记录")
-            return homeConfirmed && paymentCompleted && expenseRecorded
+            if (frame.scenario.scenarioId != "pet-grooming") return false
+            return groomingMilestones.containsAll(
+                setOf(
+                    GroomingMilestone.HOME_CONFIRMED,
+                    GroomingMilestone.PAYMENT_COMPLETED,
+                    GroomingMilestone.EXPENSE_RECORDED,
+                ),
+            )
         }
-
-        private fun workflowText(frame: AgentExperienceFrame): String =
-            buildString {
-                frame.finalSummary?.let { appendLine(it) }
-                frame.taskLogs.forEach { appendLine(it.text) }
-                frame.systemSignals.forEach { appendLine(it) }
-            }.lowercase()
 
         private fun handleAgentMessage(content: String, metadata: Map<String, String>) {
             val runtime = metadata["_runtime"].orEmpty()
             val tool = metadata["_tool"].orEmpty()
+            if (runtime == "tool" && metadata["_ok"] == "1") {
+                recordGroomingMilestones(tool, content)
+            }
             _frame.update { frame ->
                 val debugLine = buildDebugLine(runtime, tool, content)
                 val base = frame.copy(debugTrace = appendTrace(frame.debugTrace, debugLine))
@@ -1142,6 +1121,29 @@ class AgentExperienceViewModel
             return runCatching { JSONObject(json) }.getOrNull()
         }
 
+        private fun recordGroomingMilestones(
+            tool: String,
+            content: String,
+        ) {
+            if (scenario.scenarioId != "pet-grooming") return
+            if (!isSystemRuntimeTool(tool)) return
+            val data = parseToolData(content) ?: return
+            val smsEventType = data.optJSONObject("sms")?.optString("eventType").orEmpty()
+            when (smsEventType) {
+                "driver_home_arrival" -> groomingMilestones += GroomingMilestone.HOME_CONFIRMED
+            }
+
+            val paymentStatus = data.optJSONObject("payment")?.optString("status").orEmpty()
+            if (paymentStatus == "completed") {
+                groomingMilestones += GroomingMilestone.PAYMENT_COMPLETED
+            }
+
+            val expenseStatus = data.optJSONObject("expense")?.optString("status").orEmpty()
+            if (expenseStatus == "recorded") {
+                groomingMilestones += GroomingMilestone.EXPENSE_RECORDED
+            }
+        }
+
         private fun parseActionButtons(json: String?, promptText: String): List<ActionButton> {
             val explicit =
                 try {
@@ -1382,6 +1384,12 @@ class AgentExperienceViewModel
         private fun nextId(prefix: String): String {
             eventCounter += 1
             return "$prefix-$eventCounter"
+        }
+
+        private enum class GroomingMilestone {
+            HOME_CONFIRMED,
+            PAYMENT_COMPLETED,
+            EXPENSE_RECORDED,
         }
 
         private companion object {

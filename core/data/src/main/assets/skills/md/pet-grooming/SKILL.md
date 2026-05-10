@@ -178,6 +178,16 @@ Action candidates should be short. Common examples:
 - `修改计划`
 - `取消`
 
+The app may normalize Lee's reply into a fixed `USER_INTENT:<id>` command before it reaches the agent. Treat these commands as authoritative user decisions:
+
+- `USER_INTENT:pet_grooming.keep_current_week`: Lee wants to keep Kylin's regular grooming this week. Continue booking and routine downstream coordination.
+- `USER_INTENT:pet_grooming.defer_current_week`: Lee wants to skip or postpone this week's run. Acknowledge briefly and stop this weekly run; do not contact PetSmart or Driver.
+- `USER_INTENT:pet_grooming.book_0900`: Lee chooses the 9:00 PetSmart slot. Confirm that slot with PetSmart, wait for PetSmart's booking confirmation SMS, then coordinate Driver.
+- `USER_INTENT:pet_grooming.ask_afternoon`: Ask PetSmart about afternoon availability or service scope before making a final booking.
+- `USER_INTENT:pet_grooming.find_alternative_shop`: Look for another grooming shop because PetSmart's options are not acceptable.
+- `USER_INTENT:general.modify_plan`, `USER_INTENT:general.rewrite_plan`, `USER_INTENT:general.cancel`: apply the corresponding plan change or cancellation.
+- `USER_INTENT:general.freeform` followed by `USER_TEXT:`: use the user text as the instruction, and ask only if it is materially ambiguous.
+
 When PetSmart offers a materially different time or service scope, ask with one concise Chinese sentence and provide only the actual decision choices as action candidates. Do not expose facts such as "booking secured" or service descriptions as action candidates.
 
 ## Blueprint Surface

@@ -1,0 +1,839 @@
+package com.mobilebot.chat
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.launch
+
+@Composable
+fun AgentExperienceScreen(
+    onOpenChat: () -> Unit,
+    onOpenSettings: () -> Unit,
+    viewModel: AgentExperienceViewModel = hiltViewModel(),
+) {
+    val frame by viewModel.frame.collectAsState()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    var blueprintOpen by rememberSaveable { mutableStateOf(false) }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            TraceDrawer(frame.debugTrace)
+        },
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(AgentBlack)
+                .testTag("agent_surface"),
+            color = AgentBlack,
+        ) {
+            PhoneFlowCanvas(
+                frame = frame,
+                blueprintOpen = blueprintOpen,
+                onToggleBlueprint = { blueprintOpen = !blueprintOpen },
+                onCollapseBlueprint = { blueprintOpen = false },
+                onOpenTrace = { scope.launch { drawerState.open() } },
+                onOpenSettings = onOpenSettings,
+                onOpenChat = onOpenChat,
+                onStart = viewModel::startScenario,
+                onAction = viewModel::chooseDecision,
+                onSubmitText = viewModel::submitDecisionText,
+                onDismissNotification = viewModel::dismissSystemNotification,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhoneFlowCanvas(
+    frame: AgentExperienceFrame,
+    blueprintOpen: Boolean,
+    onToggleBlueprint: () -> Unit,
+    onCollapseBlueprint: () -> Unit,
+    onOpenTrace: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenChat: () -> Unit,
+    onStart: () -> Unit,
+    onAction: (ActionButton) -> Unit,
+    onSubmitText: (String) -> Unit,
+    onDismissNotification: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AgentBlack)
+            .imePadding(),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (blueprintOpen) {
+                BlueprintDeck(
+                    frame = frame,
+                )
+            } else {
+                TimeHeader(
+                    frame = frame,
+                    onToggleBlueprint = onToggleBlueprint,
+                    onOpenTrace = onOpenTrace,
+                    onOpenSettings = onOpenSettings,
+                )
+            }
+            SessionArea(
+                frame = frame,
+                blueprintOpen = blueprintOpen,
+                onCollapseBlueprint = onCollapseBlueprint,
+                onStart = onStart,
+                onAction = onAction,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 28.dp)
+                    .padding(top = if (blueprintOpen) 10.dp else 14.dp),
+            )
+            InteractionDock(
+                active = frame.decisionPrompt != null && !frame.busy,
+                onOpenChat = onOpenChat,
+                onSubmitText = onSubmitText,
+            )
+        }
+
+        frame.systemNotification?.let { notification ->
+            SystemNotificationOverlay(
+                notification = notification,
+                onDismiss = onDismissNotification,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TimeHeader(
+    frame: AgentExperienceFrame,
+    onOpenTrace: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onToggleBlueprint: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(126.dp),
+        color = AgentBlack,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 18.dp, top = 22.dp, end = 18.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onOpenTrace) {
+                Icon(Icons.Default.Menu, contentDescription = "Execution trace", tint = AgentWhite)
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onToggleBlueprint),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = frame.clockTimeText,
+                    color = AgentWhite,
+                    fontSize = 32.sp,
+                    lineHeight = 36.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                )
+                Text(
+                    text = frame.clockDateText,
+                    color = AgentMuted,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AgentWhite)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BlueprintDeck(
+    frame: AgentExperienceFrame,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(430.dp),
+        color = BlueprintGray,
+        shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 26.dp, top = 24.dp, end = 26.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Kylin Daily Care",
+                        color = AgentWhite,
+                        fontSize = 22.sp,
+                        lineHeight = 26.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = "Live Task Blueprint",
+                        color = AgentWhite.copy(alpha = 0.72f),
+                        fontSize = 12.sp,
+                        lineHeight = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
+                    BlueprintPartyAvatar("NT")
+                    BlueprintPartyAvatar("PS")
+                    BlueprintPartyAvatar("D")
+                }
+            }
+            if (frame.taskLogs.isEmpty()) {
+                Text(
+                    text = "Waiting for task activity.",
+                    color = AgentWhite.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(13.dp),
+                ) {
+                    items(frame.taskLogs) { row ->
+                        TaskLogRow(row)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BlueprintPartyAvatar(label: String) {
+    Surface(
+        modifier = Modifier.size(42.dp),
+        color = AgentPanel,
+        contentColor = AgentWhite,
+        shape = CircleShape,
+        border = BorderStroke(1.dp, AgentWhite.copy(alpha = 0.24f)),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SessionArea(
+    frame: AgentExperienceFrame,
+    blueprintOpen: Boolean,
+    onCollapseBlueprint: () -> Unit,
+    onStart: () -> Unit,
+    onAction: (ActionButton) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val messages = frame.conversationItems
+    val actions = remember(frame.decisionPrompt, frame.hasStarted, frame.busy, frame.finalSummary, frame.error) {
+        conversationActions(frame)
+    }
+    val activeDecision = frame.decisionPrompt != null
+    val listState = rememberLazyListState()
+    val lastItemIndex = messages.lastIndex + if (actions.isNotEmpty()) 1 else 0
+
+    LaunchedEffect(lastItemIndex, frame.statusLabel) {
+        if (lastItemIndex >= 0) {
+            listState.animateScrollToItem(lastItemIndex)
+        }
+    }
+
+    val areaModifier =
+        if (blueprintOpen) {
+            modifier.clickable(onClick = onCollapseBlueprint)
+        } else {
+            modifier
+        }
+
+    LazyColumn(
+        modifier = areaModifier
+            .fillMaxWidth()
+            .testTag("session_area"),
+        state = listState,
+        contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        items(messages) { message ->
+            ConversationBubble(message)
+        }
+        if (actions.isNotEmpty()) {
+            item {
+                ConversationActionRow(
+                    actions = actions,
+                    enabled = !frame.busy,
+                    onAction = { action ->
+                        if (activeDecision) onAction(action) else onStart()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationActionRow(
+    actions: List<ActionButton>,
+    enabled: Boolean,
+    onAction: (ActionButton) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("session_actions"),
+        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(actions) { action ->
+            ActionOptionBubble(
+                label = action.label,
+                enabled = enabled,
+                onClick = { onAction(action) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActionOptionBubble(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .height(67.dp)
+            .widthIn(max = 180.dp),
+        enabled = enabled,
+        color = if (enabled) AgentPanel else AgentPanel.copy(alpha = 0.42f),
+        contentColor = if (enabled) AgentWhite else AgentMuted,
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label,
+                fontSize = 16.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+@Composable
+private fun TaskProgressStrip(
+    frame: AgentExperienceFrame,
+    modifier: Modifier = Modifier,
+) {
+    val progress = frame.progressLine
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .testTag("task_progress"),
+        color = AgentPanel,
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = progress.label,
+                color = AgentWhite,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
+            Text(
+                text = progress.detail,
+                modifier = Modifier.weight(1f),
+                color = AgentMuted,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${progress.completed}/${progress.total.coerceAtLeast(1)}",
+                color = AgentWhite,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun InteractionDock(
+    active: Boolean,
+    onOpenChat: () -> Unit,
+    onSubmitText: (String) -> Unit,
+) {
+    var composing by rememberSaveable(active) { mutableStateOf(false) }
+    var input by rememberSaveable(active) { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(active, composing) {
+        if (active && composing) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AgentBlack)
+            .padding(start = 28.dp, end = 28.dp, top = 12.dp, bottom = 28.dp)
+            .testTag("interaction_area"),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (active && composing) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(
+                        onSend = {
+                            val value = input.trim()
+                            if (value.isNotEmpty()) {
+                                onSubmitText(value)
+                                input = ""
+                                composing = false
+                            }
+                        },
+                    ),
+                    placeholder = { Text("Type") },
+                )
+                Button(
+                    onClick = {
+                        val value = input.trim()
+                        if (value.isNotEmpty()) {
+                            onSubmitText(value)
+                            input = ""
+                            composing = false
+                        }
+                    },
+                    enabled = input.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AgentWhite,
+                        contentColor = AgentBlack,
+                        disabledContainerColor = AgentPanel,
+                        disabledContentColor = AgentMuted,
+                    ),
+                ) {
+                    Text("Send")
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircleToolButton(enabled = active, onClick = onOpenChat) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Add",
+                        tint = if (active) AgentWhite else AgentMuted,
+                    )
+                }
+                Surface(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .weight(1f)
+                        .clickable(enabled = active) { composing = true },
+                    color = if (active) AgentPanel else AgentPanel.copy(alpha = 0.42f),
+                    shape = RoundedCornerShape(24.dp),
+                    border = if (active) BorderStroke(1.dp, AgentWhite.copy(alpha = 0.64f)) else null,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Type",
+                            color = if (active) AgentWhite else AgentMuted,
+                            fontSize = 12.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+                PillToolButton("Talk", enabled = active, onClick = onOpenChat)
+                PillToolButton("Live", enabled = active, onClick = onOpenChat)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationBubble(message: AgentConversationItem) {
+    val isUser = message.role == AgentConversationRole.USER
+    val bubbleModifier = if (isUser) {
+        Modifier
+            .widthIn(max = 280.dp)
+            .heightIn(min = 67.dp)
+    } else {
+        Modifier.fillMaxWidth(0.86f)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+    ) {
+        Surface(
+            modifier = bubbleModifier,
+            color = if (isUser) AgentPanel else Color.Transparent,
+            contentColor = AgentWhite,
+            shape = RoundedCornerShape(24.dp),
+            border = if (isUser) null else BorderStroke(1.dp, AgentWhite),
+        ) {
+            if (isUser) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 17.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = message.text,
+                        color = AgentWhite,
+                        fontSize = 16.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            } else {
+                Text(
+                    text = message.text,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 17.dp),
+                    color = AgentWhite,
+                    fontSize = 16.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskLogRow(row: AgentTaskLog) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        row.timeText?.let { time ->
+            Text(
+                text = time,
+                modifier = Modifier.width(72.dp),
+                color = AgentWhite.copy(alpha = 0.66f),
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+            )
+        }
+        Text(
+            text = row.text,
+            modifier = Modifier.weight(1f),
+            color = AgentWhite,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun SystemNotificationOverlay(
+    notification: AgentSystemNotification,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AgentBlack.copy(alpha = 0.84f))
+            .testTag("system_notification"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 34.dp)
+                .heightIn(min = 292.dp),
+            color = Color.Transparent,
+            contentColor = AgentWhite,
+            shape = RoundedCornerShape(28.dp),
+            border = BorderStroke(1.dp, AgentWhite.copy(alpha = 0.56f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+            ) {
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    color = Color.Transparent,
+                    contentColor = AgentWhite,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, AgentWhite.copy(alpha = 0.62f)),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "!",
+                            fontSize = 22.sp,
+                            lineHeight = 24.sp,
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
+                }
+                Text(
+                    text = notification.title,
+                    color = AgentWhite,
+                    fontSize = 21.sp,
+                    lineHeight = 25.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = notification.timeText,
+                    color = AgentWhite.copy(alpha = 0.68f),
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = notification.body,
+                    color = AgentWhite.copy(alpha = 0.84f),
+                    fontSize = 14.sp,
+                    lineHeight = 19.sp,
+                    textAlign = TextAlign.Center,
+                )
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clickable(onClick = onDismiss),
+                    color = AgentWhite,
+                    contentColor = AgentBlack,
+                    shape = RoundedCornerShape(28.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = notification.actionLabel,
+                            fontSize = 15.sp,
+                            lineHeight = 18.sp,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircleToolButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .size(48.dp)
+            .clickable(enabled = enabled, onClick = onClick),
+        color = if (enabled) AgentPanel else AgentPanel.copy(alpha = 0.42f),
+        shape = CircleShape,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun PillToolButton(
+    text: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .width(64.dp)
+            .height(48.dp)
+            .clickable(enabled = enabled, onClick = onClick),
+        color = if (enabled) AgentPanel else AgentPanel.copy(alpha = 0.42f),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = text,
+                color = if (enabled) AgentWhite else AgentMuted,
+                fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TraceDrawer(trace: List<String>) {
+    ModalDrawerSheet(
+        drawerContainerColor = AgentPanel,
+        drawerContentColor = AgentWhite,
+    ) {
+        Text(
+            text = "Execution Trace",
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            color = AgentWhite,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        HorizontalDivider(color = AgentWhite.copy(alpha = 0.18f))
+        if (trace.isEmpty()) {
+            Text(
+                text = "No trace yet.",
+                modifier = Modifier.padding(20.dp),
+                color = AgentMuted,
+            )
+        } else {
+            LazyColumn(contentPadding = PaddingValues(12.dp)) {
+                items(trace) { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AgentMuted,
+                        modifier = Modifier.padding(vertical = 5.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun conversationActions(frame: AgentExperienceFrame): List<ActionButton> =
+    when {
+        frame.decisionPrompt != null -> frame.decisionPrompt.actions
+        !frame.hasStarted -> listOf(ActionButton("OK", "OK"))
+        frame.error != null -> listOf(ActionButton("Retry", "Retry"))
+        else -> emptyList()
+    }
+
+private val AgentBlack = Color(0xFF050505)
+private val AgentPanel = Color(0xFF1A1A1A)
+private val BlueprintGray = Color(0xFF545454)
+private val AgentMuted = Color(0xFFA8A8A8)
+private val AgentWhite = Color.White

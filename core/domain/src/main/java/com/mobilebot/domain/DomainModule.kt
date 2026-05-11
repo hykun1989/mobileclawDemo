@@ -2,6 +2,7 @@ package com.mobilebot.domain
 
 import com.mobilebot.domain.tools.CallServiceTool
 import com.mobilebot.domain.tools.CheckSubtaskTool
+import com.mobilebot.domain.tools.CompletePaymentTool
 import com.mobilebot.domain.tools.CopyToClipboardTool
 import com.mobilebot.domain.tools.CreatePlanTool
 import com.mobilebot.domain.tools.DialNumberTool
@@ -27,8 +28,12 @@ import com.mobilebot.domain.tools.DeepLinkAppTool
 import com.mobilebot.domain.tools.GetDeviceStateTool
 import com.mobilebot.domain.tools.PlayMediaTool
 import com.mobilebot.domain.tools.QueryCalendarTool
+import com.mobilebot.domain.tools.QueryServiceTool
+import com.mobilebot.domain.tools.RecordExpenseTool
 import com.mobilebot.domain.tools.SkillTool
+import com.mobilebot.domain.tools.ResolvePlaceTool
 import com.mobilebot.domain.tools.ToggleFlashlightTool
+import com.mobilebot.domain.tools.TranscribeCallTool
 import com.mobilebot.domain.tools.WriteSandboxFileTool
 import com.mobilebot.domain.tools.Tool
 import dagger.Binds
@@ -159,4 +164,24 @@ abstract class DomainToolModule {
     @Binds
     @IntoSet
     abstract fun bindPlayMedia(tool: PlayMediaTool): Tool
+
+    @Binds
+    @IntoSet
+    abstract fun bindQueryService(tool: QueryServiceTool): Tool
+
+    @Binds
+    @IntoSet
+    abstract fun bindResolvePlace(tool: ResolvePlaceTool): Tool
+
+    @Binds
+    @IntoSet
+    abstract fun bindTranscribeCall(tool: TranscribeCallTool): Tool
+
+    @Binds
+    @IntoSet
+    abstract fun bindCompletePayment(tool: CompletePaymentTool): Tool
+
+    @Binds
+    @IntoSet
+    abstract fun bindRecordExpense(tool: RecordExpenseTool): Tool
 }

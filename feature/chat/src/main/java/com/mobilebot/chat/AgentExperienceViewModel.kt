@@ -9,6 +9,12 @@ import com.mobilebot.domain.AgentLoop
 import com.mobilebot.domain.ForegroundController
 import com.mobilebot.domain.interaction.ActionPromptCodec
 import com.mobilebot.domain.todo.TodoListCodec
+import com.mobilebot.systemruntime.CallEndedEvent
+import com.mobilebot.systemruntime.IncomingCallEvent
+import com.mobilebot.systemruntime.IncomingSmsEvent
+import com.mobilebot.systemruntime.ReminderFiredEvent
+import com.mobilebot.systemruntime.SystemRuntime
+import com.mobilebot.systemruntime.SystemRuntimeEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -36,6 +42,7 @@ class AgentExperienceViewModel
         private val settings: UserSettingsRepository,
         private val foreground: ForegroundController,
         private val decisionIntentNormalizer: ScenarioDecisionIntentNormalizer,
+        private val systemRuntime: SystemRuntime,
     ) : ViewModel() {
         private var currentChatId: String? = null
         private var eventCounter = 0
@@ -117,6 +124,11 @@ class AgentExperienceViewModel
                     if (msg.chatId != currentChatId) return@collect
                     if (msg.metadata["_progress"] == "1") return@collect
                     handleAgentMessage(msg.content, msg.metadata)
+                }
+            }
+            viewModelScope.launch {
+                systemRuntime.events.collect { event ->
+                    handleSystemRuntimeEvent(event)
                 }
             }
             viewModelScope.launch {
@@ -1536,11 +1548,8 @@ class AgentExperienceViewModel
             if (due.isEmpty()) return
             for (event in due) {
                 deliveredTimelineEvents += event.id
-                _frame.update {
-                    it.copy(
-                        recentSystemEvents = appendSystemEvent(it.recentSystemEvents, event),
-                        debugTrace = appendTrace(it.debugTrace, "system event -> ${event.id}"),
-                    )
+                viewModelScope.launch {
+                    systemRuntime.publishEvent(event.toSystemRuntimeEvent())
                 }
             }
             if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
@@ -1550,19 +1559,72 @@ class AgentExperienceViewModel
             }
         }
 
+        private fun handleSystemRuntimeEvent(event: SystemRuntimeEvent) {
+            _frame.update {
+                it.copy(
+                    recentSystemEvents = appendSystemEvent(it.recentSystemEvents, event),
+                    debugTrace = appendTrace(it.debugTrace, "system event -> ${event.id}"),
+                )
+            }
+        }
+
         private fun appendSystemEvent(
             existing: List<AgentSystemEvent>,
-            event: ScenarioTimelineEvent,
+            event: SystemRuntimeEvent,
         ): List<AgentSystemEvent> =
             (
                 existing + AgentSystemEvent(
                     id = event.id,
-                    timeText = blueprintTimeText(event.triggerAt),
+                    timeText = blueprintTimeText(event.occurredAt),
                     source = event.source,
                     title = event.title,
                     body = event.body,
                 )
             ).takeLast(MAX_SYSTEM_EVENTS)
+
+        private fun ScenarioTimelineEvent.toSystemRuntimeEvent(): SystemRuntimeEvent =
+            when (type) {
+                "incoming_sms" -> IncomingSmsEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    from = source,
+                )
+                "incoming_call" -> IncomingCallEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    contact = source,
+                )
+                "call_ended" -> CallEndedEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    contact = source,
+                    audioRef = id,
+                )
+                "reminder_fired" -> ReminderFiredEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    reminderId = id,
+                )
+                else -> com.mobilebot.systemruntime.RuntimeNotificationEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                )
+            }
 
         private fun selectedAppointmentIsAfternoon(): Boolean =
             latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingBookAfternoonBathOnly

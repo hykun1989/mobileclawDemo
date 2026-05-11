@@ -1,0 +1,65 @@
+package com.mobilebot.systemruntime
+
+import java.time.LocalDateTime
+
+// 系统事件只描述已经发生的外部事实
+sealed interface SystemRuntimeEvent {
+    val id: String
+    val occurredAt: LocalDateTime
+    val source: String
+    val title: String
+    val body: String
+}
+
+data class IncomingSmsEvent(
+    override val id: String,
+    override val occurredAt: LocalDateTime,
+    override val source: String,
+    override val title: String,
+    override val body: String,
+    val from: String,
+) : SystemRuntimeEvent
+
+data class IncomingCallEvent(
+    override val id: String,
+    override val occurredAt: LocalDateTime,
+    override val source: String,
+    override val title: String,
+    override val body: String,
+    val contact: String,
+) : SystemRuntimeEvent
+
+data class CallEndedEvent(
+    override val id: String,
+    override val occurredAt: LocalDateTime,
+    override val source: String,
+    override val title: String,
+    override val body: String,
+    val contact: String,
+    val audioRef: String,
+) : SystemRuntimeEvent
+
+data class ReminderFiredEvent(
+    override val id: String,
+    override val occurredAt: LocalDateTime,
+    override val source: String,
+    override val title: String,
+    override val body: String,
+    val reminderId: String,
+) : SystemRuntimeEvent
+
+data class RuntimeNotificationEvent(
+    override val id: String,
+    override val occurredAt: LocalDateTime,
+    override val source: String,
+    override val title: String,
+    override val body: String,
+) : SystemRuntimeEvent
+
+data class DeviceStateEvent(
+    override val id: String,
+    override val occurredAt: LocalDateTime,
+    override val source: String,
+    override val title: String,
+    override val body: String,
+) : SystemRuntimeEvent

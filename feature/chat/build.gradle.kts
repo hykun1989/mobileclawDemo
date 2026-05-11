@@ -33,6 +33,7 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
     implementation(project(":core:network"))
+    implementation(project(":core:systemruntime"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

@@ -7,6 +7,9 @@ import com.mobilebot.domain.profile.UserProfileStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -36,6 +39,8 @@ class SystemRuntime
         private val callLog = mutableListOf<Map<String, Any?>>()
         private val runtimeProfiles: List<SystemRuntimeProfile> by lazy { loadRuntimeProfiles() }
         private var selectedServiceName: String? = null
+        private val _events = MutableSharedFlow<SystemRuntimeEvent>(extraBufferCapacity = 16)
+        val events: SharedFlow<SystemRuntimeEvent> = _events.asSharedFlow()
 
         fun bootstrap() {
             runBlocking {
@@ -77,6 +82,10 @@ class SystemRuntime
         suspend fun sendSmsFromTool(params: JSONObject): SystemRuntimeResult = sendSms(params)
 
         fun searchContactsFromTool(params: JSONObject): SystemRuntimeResult = contacts(params)
+
+        suspend fun publishEvent(event: SystemRuntimeEvent) {
+            _events.emit(event)
+        }
 
         suspend fun waitForSms(params: JSONObject): SystemRuntimeResult {
             val watch = synchronized(smsLock) {

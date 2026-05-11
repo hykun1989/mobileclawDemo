@@ -56,6 +56,7 @@ class AgentExperienceViewModel
         private var activeGroomingDate = INITIAL_SCENARIO_CLOCK.toLocalDate().plusDays(1)
         private var clockMode = ScenarioClockMode.Live
         private var normalClockElapsedMs = 0L
+        private var petGroomingAccepted = false
         private val deliveredTimelineEvents = mutableSetOf<String>()
         private val taskStates = linkedMapOf<String, AgentTaskState>()
         private val groomingMilestones = mutableSetOf<GroomingMilestone>()
@@ -75,6 +76,22 @@ class AgentExperienceViewModel
                 source = "Ella",
                 title = "Ella 来电",
                 body = "通话中会提到一个需要跟进的家庭待办。",
+            ),
+            ScenarioTimelineEvent(
+                id = "driver-1320-confirm",
+                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(8),
+                type = "incoming_sms",
+                source = "Driver",
+                title = "老陈回复",
+                body = "好的，我 13:20 到楼下等 Kylin。",
+            ),
+            ScenarioTimelineEvent(
+                id = "ella-call-ended",
+                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(11),
+                type = "call_ended",
+                source = "Ella",
+                title = "Ella 通话结束",
+                body = "通话转写完成，识别到一个家庭采购待办。",
             ),
             ScenarioTimelineEvent(
                 id = "kylin-downstairs-reminder",
@@ -195,8 +212,12 @@ class AgentExperienceViewModel
         }
 
         fun chooseDecision(action: ActionButton) {
-            val chatId = currentChatId ?: return
             if (_frame.value.busy) return
+            if (action.value.startsWith(SCRIPTED_ACTION_PREFIX)) {
+                handleScriptedDecision(action)
+                return
+            }
+            val chatId = currentChatId ?: return
             continueWithNormalizedDecision(
                 chatId = chatId,
                 displayText = action.label,
@@ -1575,11 +1596,318 @@ class AgentExperienceViewModel
                     debugTrace = appendTrace(it.debugTrace, "system event -> ${event.id}"),
                 )
             }
+            when (event) {
+                is IncomingSmsEvent -> handleIncomingSmsEvent(event)
+                is IncomingCallEvent -> handleIncomingCallEvent(event)
+                is CallEndedEvent -> handleCallEndedEvent(event)
+                is ReminderFiredEvent -> handleReminderEvent(event)
+                else -> Unit
+            }
+        }
+
+        private fun handleIncomingSmsEvent(event: IncomingSmsEvent) {
+            when (event.id) {
+                "petsmart-open-slot" -> createPetGroomingTask(event)
+                "driver-1320-confirm" -> handleDriverPickupConfirmation(event)
+            }
+        }
+
+        private fun createPetGroomingTask(event: IncomingSmsEvent) {
+            val task = AgentTaskState(
+                id = PET_TASK_ID,
+                title = "麒麟洗护",
+                subtitle = "PetSmart 14:00 空档待确认",
+                status = AgentTimelineStatus.BLOCKED,
+                updatedTimeText = blueprintTimeText(scenarioClock),
+                conversationItems = listOf(
+                    AgentConversationItem(
+                        id = nextId("conversation"),
+                        role = AgentConversationRole.AGENT,
+                        text = "PetSmart 来信息说 14:00 空出来了，可以安排 Kylin 洗澡和去浮毛。要把原来 17:00 只洗澡改到 14:00 吗？",
+                    ),
+                ),
+                taskLogs = listOf(
+                    AgentTaskLog(
+                        id = nextId("task"),
+                        timeText = blueprintTimeText(scenarioClock),
+                        text = "收到 PetSmart 的短信：${event.body}",
+                    ),
+                ),
+                participants = listOf(
+                    AgentParticipant("petsmart", "PS", "PetSmart", "grooming_shop"),
+                ),
+                progressLine = AgentProgressLine(
+                    label = "等待",
+                    detail = "等待用户决策",
+                    completed = 0,
+                    total = 5,
+                ),
+                decisionPrompt = DecisionPrompt(
+                    text = "要把 Kylin 改到 14:00 洗澡和去浮毛吗？",
+                    actions = listOf(
+                        ActionButton("可以", "${SCRIPTED_ACTION_PREFIX}pet.accept_14"),
+                        ActionButton("不改了", "${SCRIPTED_ACTION_PREFIX}pet.keep_17"),
+                    ),
+                ),
+                timeline = listOf(
+                    AgentTimelineEvent(
+                        id = nextId("timeline"),
+                        title = "PetSmart 来信",
+                        detail = event.body,
+                        status = AgentTimelineStatus.BLOCKED,
+                    ),
+                ),
+            )
+            upsertTask(task)
+        }
+
+        private fun handleScriptedDecision(action: ActionButton) {
+            when (action.value.removePrefix(SCRIPTED_ACTION_PREFIX)) {
+                "pet.accept_14" -> acceptPetSmartOpenSlot(action.label)
+                "pet.keep_17" -> keepOriginalPetSmartSlot(action.label)
+            }
+        }
+
+        private fun acceptPetSmartOpenSlot(label: String) {
+            val frame = _frame.value
+            val task = taskStates[PET_TASK_ID] ?: return
+            val updated = task.copy(
+                status = AgentTimelineStatus.RUNNING,
+                updatedTimeText = blueprintTimeText(scenarioClock),
+                subtitle = "已改约 14:00，等待司机确认",
+                conversationItems = appendConversation(
+                    appendConversation(frame.conversationItems, AgentConversationRole.USER, label),
+                    AgentConversationRole.AGENT,
+                    "我已经回复 PetSmart 同意改到 14:00，并联系了司机老陈，正在等他确认。",
+                ),
+                taskLogs = appendTaskLogs(
+                    frame.taskLogs,
+                    listOf(
+                        AgentTaskLog(
+                            id = nextId("task"),
+                            timeText = blueprintTimeText(scenarioClock),
+                            text = "发送短信给 PetSmart：好的，14:00 准时到。",
+                        ),
+                        AgentTaskLog(
+                            id = nextId("task"),
+                            timeText = blueprintTimeText(scenarioClock),
+                            text = "添加 Driver 到参与方。",
+                        ),
+                        AgentTaskLog(
+                            id = nextId("task"),
+                            timeText = blueprintTimeText(scenarioClock),
+                            text = "发送短信给 Driver：老陈，麻烦 13:20 来楼下接 Kylin，14:00 前送到 PetSmart 洗澡和去浮毛。",
+                        ),
+                    ),
+                ),
+                participants = listOf(
+                    AgentParticipant("petsmart", "PS", "PetSmart", "grooming_shop"),
+                    AgentParticipant("driver", "陈", "老陈", "driver"),
+                ),
+                progressLine = AgentProgressLine(
+                    label = "进行中",
+                    detail = "等待司机确认",
+                    completed = 2,
+                    total = 5,
+                ),
+                decisionPrompt = null,
+                activeActionValue = null,
+                timeline = frame.timeline + AgentTimelineEvent(
+                    id = nextId("timeline"),
+                    title = "已改约",
+                    detail = "PetSmart 和 Driver 已通知。",
+                    status = AgentTimelineStatus.RUNNING,
+                ),
+            )
+            upsertTask(updated)
+            petGroomingAccepted = true
+        }
+
+        private fun keepOriginalPetSmartSlot(label: String) {
+            val frame = _frame.value
+            val task = taskStates[PET_TASK_ID] ?: return
+            val updated = task.copy(
+                status = AgentTimelineStatus.DONE,
+                updatedTimeText = blueprintTimeText(scenarioClock),
+                subtitle = "保留 17:00 只洗澡",
+                conversationItems = appendConversation(
+                    appendConversation(frame.conversationItems, AgentConversationRole.USER, label),
+                    AgentConversationRole.AGENT,
+                    "好的，保留原来的 17:00 只洗澡安排。",
+                ),
+                taskLogs = appendTaskLogs(
+                    frame.taskLogs,
+                    listOf(
+                        AgentTaskLog(
+                            id = nextId("task"),
+                            timeText = blueprintTimeText(scenarioClock),
+                            text = "保留 PetSmart 17:00 只洗澡安排。",
+                        ),
+                    ),
+                ),
+                progressLine = AgentProgressLine(
+                    label = "完成",
+                    detail = "已保留原安排",
+                    completed = 1,
+                    total = 1,
+                ),
+                decisionPrompt = null,
+                activeActionValue = null,
+                finalSummary = "已保留原来的 17:00 只洗澡安排。",
+            )
+            upsertTask(updated)
+        }
+
+        private fun handleDriverPickupConfirmation(event: IncomingSmsEvent) {
+            if (!petGroomingAccepted) return
+            updateTaskState(PET_TASK_ID, activate = false) { task ->
+                task.copy(
+                    status = AgentTimelineStatus.RUNNING,
+                    updatedTimeText = blueprintTimeText(scenarioClock),
+                    subtitle = "司机 13:20 到楼下",
+                    conversationItems = appendConversation(
+                        task.conversationItems,
+                        AgentConversationRole.AGENT,
+                        "司机老陈已经回复 OK，我给你定了 13:20 送 Kylin 下楼的提醒。",
+                    ),
+                    taskLogs = appendTaskLogs(
+                        task.taskLogs,
+                        listOf(
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(scenarioClock),
+                                text = "收到 Driver 的短信：${event.body}",
+                            ),
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(scenarioClock),
+                                text = "创建提醒：送 Kylin 下楼（13:20）。",
+                            ),
+                        ),
+                    ),
+                    progressLine = AgentProgressLine(
+                        label = "进行中",
+                        detail = "等待 13:20 提醒",
+                        completed = 3,
+                        total = 5,
+                    ),
+                )
+            }
+        }
+
+        private fun handleIncomingCallEvent(event: IncomingCallEvent) {
+            _frame.update {
+                it.copy(
+                    systemNotification = AgentSystemNotification(
+                        id = event.id,
+                        title = "Ella 来电",
+                        timeText = blueprintTimeText(event.occurredAt),
+                        body = "正在接入通话转写。",
+                        actionLabel = "接听",
+                    ),
+                )
+            }
+        }
+
+        private fun handleCallEndedEvent(event: CallEndedEvent) {
+            val task = AgentTaskState(
+                id = FAMILY_TASK_ID,
+                title = "家庭采购",
+                subtitle = "Ella 电话交代的待办",
+                status = AgentTimelineStatus.RUNNING,
+                updatedTimeText = blueprintTimeText(scenarioClock),
+                conversationItems = listOf(
+                    AgentConversationItem(
+                        id = nextId("conversation"),
+                        role = AgentConversationRole.AGENT,
+                        text = "刚才 Ella 电话里提到周末家庭采购，我已经帮你建立任务跟踪，会继续整理需要确认的事项。",
+                    ),
+                ),
+                taskLogs = listOf(
+                    AgentTaskLog(
+                        id = nextId("task"),
+                        timeText = blueprintTimeText(scenarioClock),
+                        text = "通话转写完成：识别到 Ella 交代的家庭采购待办。",
+                    ),
+                    AgentTaskLog(
+                        id = nextId("task"),
+                        timeText = blueprintTimeText(scenarioClock),
+                        text = "新建家庭采购任务。",
+                    ),
+                ),
+                participants = listOf(
+                    AgentParticipant("ella", "E", "Ella", "family"),
+                ),
+                progressLine = AgentProgressLine(
+                    label = "进行中",
+                    detail = "整理待办事项",
+                    completed = 1,
+                    total = 3,
+                ),
+            )
+            upsertTask(task)
+        }
+
+        private fun handleReminderEvent(event: ReminderFiredEvent) {
+            _frame.update {
+                it.copy(
+                    systemNotification = AgentSystemNotification(
+                        id = event.id,
+                        title = event.title,
+                        timeText = blueprintTimeText(event.occurredAt),
+                        body = event.body,
+                        actionLabel = "OK",
+                    ),
+                )
+            }
+            updateTaskState(PET_TASK_ID, activate = false) { task ->
+                task.copy(
+                    status = AgentTimelineStatus.RUNNING,
+                    updatedTimeText = blueprintTimeText(scenarioClock),
+                    subtitle = "提醒已触发",
+                    taskLogs = appendTaskLogs(
+                        task.taskLogs,
+                        listOf(
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(scenarioClock),
+                                text = "触发提醒：送 Kylin 下楼。",
+                            ),
+                        ),
+                    ),
+                    progressLine = AgentProgressLine(
+                        label = "进行中",
+                        detail = "等待司机接到 Kylin",
+                        completed = 4,
+                        total = 5,
+                    ),
+                )
+            }
         }
 
         private fun upsertTask(task: AgentTaskState) {
+            taskStates[_frame.value.activeTaskId]?.let {
+                taskStates[it.id] = _frame.value.captureTaskState(it)
+            }
             taskStates[task.id] = task
             _frame.update { task.applyToFrame(it) }
+        }
+
+        private fun updateTaskState(
+            taskId: String,
+            activate: Boolean,
+            transform: (AgentTaskState) -> AgentTaskState,
+        ) {
+            val existing = taskStates[taskId] ?: return
+            val updated = transform(existing)
+            taskStates[taskId] = updated
+            if (activate || _frame.value.activeTaskId == taskId) {
+                _frame.update { updated.applyToFrame(it) }
+            } else {
+                _frame.update { frame ->
+                    frame.copy(taskCards = taskStates.values.map { it.toCard(activeId = frame.activeTaskId) })
+                }
+            }
         }
 
         private fun AgentExperienceFrame.captureTaskState(previous: AgentTaskState): AgentTaskState =
@@ -2054,6 +2382,9 @@ class AgentExperienceViewModel
             private const val CLOCK_ADVANCE_STEPS = 30
             private const val CLOCK_ADVANCE_STEP_MS = 1_000L
             private const val TOOL_ROUND_LIMIT_PREFIX = "Stopped: too many tool call rounds"
+            private const val SCRIPTED_ACTION_PREFIX = "MULTI:"
+            private const val PET_TASK_ID = "pet-grooming-live"
+            private const val FAMILY_TASK_ID = "family-shopping-live"
             private val INITIAL_SCENARIO_CLOCK: LocalDateTime = LocalDateTime.of(2027, 4, 25, 13, 0)
             private val CLOCK_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
             private val CLOCK_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.US)

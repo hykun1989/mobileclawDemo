@@ -171,6 +171,13 @@
     },
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
+      "messageKeywords": ["9:00前送到 Harbor Paws", "9:00 前送到 Harbor Paws", "09:00前送到 Harbor Paws", "09:00 前送到 Harbor Paws", "九点前送到 Harbor Paws", "上午8:30到家接 Kylin，9:00前送到 Harbor"],
+      "message": "短信暂未发送：Harbor Paws Salon 的 14:00 预约不能复用 PetSmart 上午9点接送时间。",
+      "instruction": "重新发送给 Driver 的短信：13:30 到家接 Kylin，14:00 前送到 Harbor Paws Salon。",
+      "replacementMessage": "司机您好，请明天13:30到家接 Kylin，14:00 前送到 Harbor Paws Salon。谢谢。"
+    },
+    {
+      "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
       "messageKeywords": ["上午9点，请到", "上午9点，麻烦到", "9点，请到", "9点，麻烦到", "9:00请到", "9:00，请到"],
       "message": "短信暂未发送：Driver 到家接 Kylin 的时间必须早于 PetSmart 上午9点预约。",
       "instruction": "重新发送给 Driver 的短信：8:30 到家接 Kylin，9:00 前送到 PetSmart。"

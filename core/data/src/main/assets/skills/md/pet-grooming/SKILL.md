@@ -263,6 +263,8 @@ Only after Y rejects PetSmart's available options or explicitly asks for alterna
 
 When Y chooses one of the available times or service scopes, proceed directly with booking and downstream coordination. Do not ask whether to confirm the selected slot again.
 
+If the selected alternative is Harbor Paws Salon for the original Sunday 14:00 bath plus de-shedding slot, keep that timing through the rest of the flow. Do not reuse PetSmart's 8:30/9:00 timing. Driver's first leg must be 13:30 home pickup and arrival at Harbor Paws Salon by 14:00.
+
 ### 4. Booking Confirmation
 
 After Y approves the chosen time and scope, confirm with the selected grooming shop and wait for the selected grooming shop's booking confirmation SMS. Only then contact Driver with pickup time, destination, and expected return timing.

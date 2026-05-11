@@ -196,7 +196,6 @@ private fun PhoneFlowCanvas(
                             frame = frame,
                             blueprintOpen = blueprintOpen,
                             onCollapseBlueprint = onCollapseBlueprint,
-                            onSelectTask = onSelectTask,
                             onStart = onStart,
                             onAction = onAction,
                             modifier = Modifier
@@ -652,7 +651,6 @@ private fun SessionArea(
     frame: AgentExperienceFrame,
     blueprintOpen: Boolean,
     onCollapseBlueprint: () -> Unit,
-    onSelectTask: (String) -> Unit,
     onStart: () -> Unit,
     onAction: (ActionButton) -> Unit,
     modifier: Modifier = Modifier,
@@ -683,13 +681,6 @@ private fun SessionArea(
             .fillMaxWidth()
             .testTag("session_area"),
     ) {
-        if (frame.taskCards.size > 1) {
-            TaskSwitcherRail(
-                tasks = frame.taskCards,
-                onSelectTask = onSelectTask,
-                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
-            )
-        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -713,66 +704,6 @@ private fun SessionArea(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TaskSwitcherRail(
-    tasks: List<AgentTaskCard>,
-    onSelectTask: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    LazyRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(tasks, key = { it.id }) { task ->
-            TaskSwitcherChip(
-                task = task,
-                onClick = { onSelectTask(task.id) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun TaskSwitcherChip(
-    task: AgentTaskCard,
-    onClick: () -> Unit,
-) {
-    // 详情页只放轻量任务切换入口，完整任务列表仍由工作台承载
-    Surface(
-        modifier = Modifier
-            .widthIn(min = 126.dp, max = 190.dp)
-            .height(58.dp)
-            .clickable(onClick = onClick),
-        color = if (task.isActive) AgentPanelActive else AgentPanel,
-        shape = RoundedCornerShape(8.dp),
-        border = if (task.isActive) BorderStroke(1.dp, AgentWhite.copy(alpha = 0.42f)) else null,
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Text(
-                text = task.title,
-                color = AgentWhite,
-                fontSize = 13.sp,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = task.subtitle,
-                color = AgentMuted,
-                fontSize = 10.sp,
-                lineHeight = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

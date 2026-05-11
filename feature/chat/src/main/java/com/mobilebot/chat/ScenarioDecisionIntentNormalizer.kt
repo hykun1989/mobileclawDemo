@@ -249,6 +249,12 @@ sealed class ScenarioDecisionIntent(
         meaning = "The user wants to modify the current plan.",
     )
 
+    data object Continue : ScenarioDecisionIntent(
+        id = "general.continue",
+        displayLabel = "继续",
+        meaning = "The user wants the agent to continue with the current plan or next safe step.",
+    )
+
     data object RewritePlan : ScenarioDecisionIntent(
         id = "general.rewrite_plan",
         displayLabel = "重写计划",
@@ -280,12 +286,13 @@ sealed class ScenarioDecisionIntent(
                     PetGroomingAskAfternoon,
                     PetGroomingBookAfternoonBathOnly,
                     PetGroomingFindAlternative,
+                    Continue,
                     ModifyPlan,
                     RewritePlan,
                     Cancel,
                     Freeform,
                 )
-                else -> listOf(ModifyPlan, RewritePlan, Cancel, Freeform)
+                else -> listOf(Continue, ModifyPlan, RewritePlan, Cancel, Freeform)
             }
     }
 }

@@ -1607,10 +1607,10 @@ class AgentExperienceViewModel
             }
             return inferred.ifEmpty {
                 listOf(
-                    ActionButton("Continue", "Continue"),
-                    ActionButton("Modify plan", "Modify plan"),
-                    ActionButton("Rewrite", "Rewrite plan"),
-                    ActionButton("Cancel", "Cancel"),
+                    ActionButton("继续", "USER_INTENT:general.continue"),
+                    ActionButton("修改计划", "USER_INTENT:general.modify_plan"),
+                    ActionButton("重写", "USER_INTENT:general.rewrite_plan"),
+                    ActionButton("取消", "USER_INTENT:general.cancel"),
                 )
             }
         }

@@ -88,7 +88,8 @@ class SystemRuntime
                 )
             }
             delay(Random.nextLong(SMS_MIN_DELAY_MS, SMS_MAX_DELAY_MS + 1))
-            val reply = generateSmsReply(watch)
+            val inboxSnapshot = synchronized(smsLock) { smsInbox.toList() }
+            val reply = generateSmsReply(watch, inboxSnapshot)
             val item = linkedMapOf<String, Any?>(
                 "id" to "sms-in-${System.currentTimeMillis()}",
                 "from" to watch.contact,
@@ -619,7 +620,10 @@ class SystemRuntime
             return left.isNotBlank() && right.isNotBlank() && (left.contains(right) || right.contains(left))
         }
 
-        private fun generateSmsReply(watch: SmsWatch): SmsReply {
+        private fun generateSmsReply(
+            watch: SmsWatch,
+            inboxSnapshot: List<Map<String, Any?>>,
+        ): SmsReply {
             val contact = watch.contact.lowercase()
             val outbound = watch.outboundMessage.trim().lowercase()
             val rule = smsResponseRules()
@@ -629,6 +633,13 @@ class SystemRuntime
                 }
                 .maxByOrNull { it.first }
                 ?.second
+            if (rule != null && rule.isBlockedBy(inboxSnapshot)) {
+                return SmsReply(
+                    message = rule.blockedReply.ifBlank { "暂不能读取这条更新，需要先完成前置确认。" },
+                    decisionPrompt = null,
+                    eventType = null,
+                )
+            }
             return SmsReply(
                 message = rule?.let { renderSmsReply(it, outbound) } ?: "收到，我会继续更新。",
                 decisionPrompt = rule?.decisionPrompt,
@@ -838,6 +849,9 @@ class SystemRuntime
             val contactAliases: List<String>,
             val keywords: List<String>,
             val excludeKeywords: List<String>,
+            val blockedUntilContactAliases: List<String>,
+            val blockedUntilKeywords: List<String>,
+            val blockedReply: String,
             val priority: Int,
             val reply: String,
             val decisionPrompt: RuntimeDecisionPrompt?,
@@ -862,6 +876,29 @@ class SystemRuntime
                 val excluded = excludeKeywords.any { outbound.contains(it.trim().lowercase()) }
                 if (!keywordMatches || excluded) return 0
                 return priority + if (keywords.isEmpty()) 1 else matchedKeywords * 10
+            }
+
+            fun isBlockedBy(inbox: List<Map<String, Any?>>): Boolean {
+                if (blockedUntilContactAliases.isEmpty() && blockedUntilKeywords.isEmpty()) return false
+                return inbox.none { item ->
+                    val contact = listOf(
+                        item["from"],
+                        item["displayName"],
+                        item["to"],
+                    ).joinToString(" ") { it?.toString().orEmpty() }.lowercase()
+                    val message = item["message"]?.toString().orEmpty().lowercase()
+                    val contactMatches = blockedUntilContactAliases.isEmpty() ||
+                        blockedUntilContactAliases.any { alias ->
+                            val normalized = alias.trim().lowercase()
+                            normalized.isNotBlank() && (contact.contains(normalized) || normalized.contains(contact))
+                        }
+                    val keywordMatches = blockedUntilKeywords.isEmpty() ||
+                        blockedUntilKeywords.any { keyword ->
+                            val normalized = keyword.trim().lowercase()
+                            normalized.isNotBlank() && message.contains(normalized)
+                        }
+                    contactMatches && keywordMatches
+                }
             }
 
         }
@@ -1069,15 +1106,21 @@ class SystemRuntime
                     val reply = obj.optString("reply")
                     if (reply.isBlank()) continue
                     add(
-                        SmsResponseRule(
-                            contactAliases = obj.optStringList("contactAliases"),
-                            keywords = obj.optStringList("keywords"),
-                            excludeKeywords = obj.optStringList("excludeKeywords"),
-                            priority = obj.optInt("priority", 0),
-                            reply = reply,
-                            decisionPrompt = parseDecisionPrompt(obj.optJSONObject("decisionPrompt")),
-                            eventType = obj.optString("eventType").trim().takeIf { it.isNotBlank() },
-                        ),
+                        run {
+                            val until = obj.optJSONObject("blockedUntil") ?: obj.optJSONObject("until")
+                            SmsResponseRule(
+                                contactAliases = obj.optStringList("contactAliases"),
+                                keywords = obj.optStringList("keywords"),
+                                excludeKeywords = obj.optStringList("excludeKeywords"),
+                                blockedUntilContactAliases = until?.optStringList("contactAliases").orEmpty(),
+                                blockedUntilKeywords = until?.optStringList("keywords").orEmpty(),
+                                blockedReply = obj.optString("blockedReply").trim(),
+                                priority = obj.optInt("priority", 0),
+                                reply = reply,
+                                decisionPrompt = parseDecisionPrompt(obj.optJSONObject("decisionPrompt")),
+                                eventType = obj.optString("eventType").trim().takeIf { it.isNotBlank() },
+                            )
+                        },
                     )
                 }
             }

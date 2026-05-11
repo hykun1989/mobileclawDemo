@@ -234,6 +234,15 @@ private fun PhoneFlowCanvas(
                 onDismiss = onDismissNotification,
             )
         }
+        if (blueprintOpen) {
+            FloatingTaskMenuButton(
+                onClick = onOpenTaskSidebar,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 20.dp, top = 24.dp)
+                    .zIndex(100f),
+            )
+        }
         AiWorkFloatingButton(
             active = frame.busy || frame.taskCards.isNotEmpty() || frame.recentSystemEvents.isNotEmpty(),
             onClick = onOpenBlueprint,
@@ -242,6 +251,26 @@ private fun PhoneFlowCanvas(
                 .padding(top = 112.dp, end = 86.dp)
                 .zIndex(100f),
         )
+    }
+}
+
+@Composable
+private fun FloatingTaskMenuButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .size(48.dp)
+            .clickable(onClick = onClick),
+        color = AgentPanel.copy(alpha = 0.9f),
+        contentColor = AgentWhite,
+        shape = CircleShape,
+        border = BorderStroke(1.dp, AgentWhite.copy(alpha = 0.16f)),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Menu, contentDescription = "任务", tint = AgentWhite)
+        }
     }
 }
 

@@ -25,6 +25,33 @@ data class AgentSystemEvent(
     val body: String,
 )
 
+data class AgentTaskCard(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val status: AgentTimelineStatus,
+    val updatedTimeText: String,
+    val isActive: Boolean = false,
+)
+
+data class AgentTaskState(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val status: AgentTimelineStatus = AgentTimelineStatus.RUNNING,
+    val updatedTimeText: String,
+    val conversationItems: List<AgentConversationItem> = emptyList(),
+    val taskLogs: List<AgentTaskLog> = emptyList(),
+    val participants: List<AgentParticipant> = emptyList(),
+    val progressLine: AgentProgressLine = AgentProgressLine("进行中", "等待下一步"),
+    val timeline: List<AgentTimelineEvent> = emptyList(),
+    val stageCards: List<AgentStageCard> = emptyList(),
+    val decisionPrompt: DecisionPrompt? = null,
+    val activeActionValue: String? = null,
+    val finalSummary: String? = null,
+    val error: String? = null,
+)
+
 enum class AgentTimelineStatus {
     PENDING,
     RUNNING,
@@ -106,6 +133,10 @@ data class AgentExperienceFrame(
     val clockMode: ScenarioClockMode = ScenarioClockMode.Live,
     val busy: Boolean = false,
     val hasStarted: Boolean = false,
+    val activeTaskId: String? = null,
+    val activeTaskTitle: String = "AIOS",
+    val activeTaskSubtitle: String = "正在等待系统事件",
+    val taskCards: List<AgentTaskCard> = emptyList(),
     val recentSystemEvents: List<AgentSystemEvent> = emptyList(),
     val conversationItems: List<AgentConversationItem> = emptyList(),
     val taskLogs: List<AgentTaskLog> = emptyList(),

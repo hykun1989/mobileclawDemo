@@ -57,6 +57,7 @@ class AgentExperienceViewModel
         private var clockMode = ScenarioClockMode.Live
         private var normalClockElapsedMs = 0L
         private val deliveredTimelineEvents = mutableSetOf<String>()
+        private val taskStates = linkedMapOf<String, AgentTaskState>()
         private val groomingMilestones = mutableSetOf<GroomingMilestone>()
         private val timelineScript = listOf(
             ScenarioTimelineEvent(
@@ -215,6 +216,14 @@ class AgentExperienceViewModel
                 rawText = value,
                 selectedActionValue = null,
             )
+        }
+
+        fun selectTask(taskId: String) {
+            val task = taskStates[taskId] ?: return
+            taskStates[_frame.value.activeTaskId]?.let {
+                taskStates[it.id] = _frame.value.captureTaskState(it)
+            }
+            _frame.update { task.applyToFrame(it) }
         }
 
         private fun continueWithNormalizedDecision(
@@ -1567,6 +1576,60 @@ class AgentExperienceViewModel
                 )
             }
         }
+
+        private fun upsertTask(task: AgentTaskState) {
+            taskStates[task.id] = task
+            _frame.update { task.applyToFrame(it) }
+        }
+
+        private fun AgentExperienceFrame.captureTaskState(previous: AgentTaskState): AgentTaskState =
+            previous.copy(
+                conversationItems = conversationItems,
+                taskLogs = taskLogs,
+                participants = participants,
+                progressLine = progressLine,
+                timeline = timeline,
+                stageCards = stageCards,
+                decisionPrompt = decisionPrompt,
+                activeActionValue = activeActionValue,
+                finalSummary = finalSummary,
+                error = error,
+            )
+
+        private fun AgentTaskState.applyToFrame(frame: AgentExperienceFrame): AgentExperienceFrame =
+            frame.copy(
+                activeTaskId = id,
+                activeTaskTitle = title,
+                activeTaskSubtitle = subtitle,
+                taskCards = taskStates.values.map { it.toCard(activeId = id) },
+                statusLabel = when (status) {
+                    AgentTimelineStatus.BLOCKED -> "Waiting for decision"
+                    AgentTimelineStatus.DONE -> "Complete"
+                    AgentTimelineStatus.FAILED -> "Error"
+                    else -> "Running"
+                },
+                hasStarted = true,
+                conversationItems = conversationItems,
+                taskLogs = taskLogs,
+                participants = participants,
+                progressLine = progressLine,
+                timeline = timeline,
+                stageCards = stageCards,
+                decisionPrompt = decisionPrompt,
+                activeActionValue = activeActionValue,
+                finalSummary = finalSummary,
+                error = error,
+            )
+
+        private fun AgentTaskState.toCard(activeId: String?): AgentTaskCard =
+            AgentTaskCard(
+                id = id,
+                title = title,
+                subtitle = subtitle,
+                status = status,
+                updatedTimeText = updatedTimeText,
+                isActive = id == activeId,
+            )
 
         private fun appendSystemEvent(
             existing: List<AgentSystemEvent>,

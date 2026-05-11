@@ -253,6 +253,13 @@ class AgentExperienceViewModel
                         ),
                     )
                 }
+                if (
+                    initialPrecheckDecision &&
+                    normalized.intent == ScenarioDecisionIntent.PetGroomingDeferCurrentWeek
+                ) {
+                    completeDeferredGroomingRun()
+                    return@launch
+                }
                 val agentText =
                     if (initialPrecheckDecision) {
                         """
@@ -265,6 +272,41 @@ class AgentExperienceViewModel
                         normalized.agentText
                     }
                 runAgentTurn(chatId, agentText)
+            }
+        }
+
+        private fun completeDeferredGroomingRun() {
+            val message = "好的，那下周再说。"
+            _frame.update {
+                val visibleBase = it.withPendingSelectedAction()
+                visibleBase.copy(
+                    busy = false,
+                    statusLabel = "完成",
+                    decisionPrompt = null,
+                    activeActionValue = null,
+                    finalSummary = message,
+                    conversationItems = appendConversation(
+                        visibleBase.conversationItems,
+                        AgentConversationRole.AGENT,
+                        message,
+                    ),
+                    progressLine = AgentProgressLine(
+                        label = "完成",
+                        detail = message,
+                        completed = totalStageCount(visibleBase),
+                        total = totalStageCount(visibleBase),
+                    ),
+                    timeline = visibleBase.timeline + AgentTimelineEvent(
+                        id = nextId("assistant"),
+                        title = "完成",
+                        detail = message,
+                        status = AgentTimelineStatus.DONE,
+                    ),
+                    debugTrace = appendTrace(visibleBase.debugTrace, "defer -> scheduled next weekly precheck"),
+                )
+            }
+            if (shouldScheduleDeferredRetrigger(_frame.value)) {
+                scheduleDeferredRetrigger()
             }
         }
 

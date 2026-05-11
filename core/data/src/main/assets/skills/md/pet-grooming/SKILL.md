@@ -8,6 +8,10 @@ allowed-tools:
   - system_search_contacts
   - system_send_sms
   - system_wait_for_sms
+  - query_service
+  - resolve_place
+  - complete_payment
+  - record_expense
   - create_plan
 context: inline
 effort: high
@@ -25,8 +29,6 @@ system-capabilities:
   - contacts
   - notifications
   - pet_salon_search
-  - payment
-  - accounting
 decision-points:
   - accept_open_slot
   - keep_original_slot
@@ -79,12 +81,19 @@ When PetSmart offers a better but preference-sensitive slot, ask Y with one conc
 Use tools only for the domain responsibility they represent:
 
 1. Read relevant memory when task context is missing.
-2. Query `pet_salon_search` for PetSmart identity, contact details, supported services, and published prices.
+2. Use `query_service` with the `pet_salon_search` endpoint for PetSmart identity, contact details, supported services, and published prices.
 3. Use `system_search_contacts` to resolve Driver only when Driver needs to be contacted.
 4. Use `system_send_sms` for outbound PetSmart and Driver messages.
 5. Use `system_wait_for_sms` when the next step depends on an inbound PetSmart or Driver reply.
-6. Use `device_system` for reminders, notifications, payment, and accounting records.
-7. Use `create_plan` only when a visible task plan helps execution; do not show internal planning as conversation content.
+6. Use `device_system` for system reminders and notifications.
+7. Use `complete_payment` and `record_expense` after the selected shop has finished service and Kylin is confirmed home.
+8. Use `create_plan` only when a visible task plan helps execution; do not show internal planning as conversation content.
+
+Service endpoint for the current PetSmart catalog:
+
+```json
+{"serviceId":"pet_salon_search","endpoint":"https://nt-petsalon-mcp.vercel.app/mcp"}
+```
 
 ## Conversation Surface
 

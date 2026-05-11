@@ -5,6 +5,9 @@ category: scenario
 version: "1"
 allowed-tools:
   - device_system
+  - transcribe_call
+  - resolve_place
+  - query_service
   - create_plan
 context: inline
 effort: medium

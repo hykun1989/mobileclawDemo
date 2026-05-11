@@ -16,6 +16,7 @@ import com.mobilebot.systemruntime.ReminderFiredEvent
 import com.mobilebot.systemruntime.RuntimeNotificationEvent
 import com.mobilebot.systemruntime.SystemRuntime
 import com.mobilebot.systemruntime.SystemRuntimeEvent
+import com.mobilebot.systemruntime.SystemRuntimeScriptEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -28,6 +29,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.TextStyle
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -64,104 +66,10 @@ class AgentExperienceViewModel
         private val pinnedTaskIds = linkedSetOf<String>()
         private val groomingMilestones = mutableSetOf<GroomingMilestone>()
         // 系统事件只负责投放外部事实，具体任务编排由 Agent 处理。
-        private val timelineScript = listOf(
-            ScenarioTimelineEvent(
-                id = "petsmart-open-slot",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(5),
-                type = "incoming_sms",
-                source = "PetSmart",
-                title = "PetSmart 来信",
-                body = "原本 14:00 的客人计划有变，现在可以安排 Kylin 洗澡和去浮毛。",
-            ),
-            ScenarioTimelineEvent(
-                id = "driver-1320-confirm",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(8),
-                type = "incoming_sms",
-                source = "Driver",
-                title = "老陈回复",
-                body = "好的，我 13:20 到楼下等 Kylin。",
-            ),
-            ScenarioTimelineEvent(
-                id = "ella-call",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(9),
-                type = "incoming_call",
-                source = "Ella",
-                title = "Ella 来电",
-                body = "通话中会提到一个需要跟进的家庭待办。",
-            ),
-            ScenarioTimelineEvent(
-                id = "ella-call-ended",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(11),
-                type = "call_ended",
-                source = "Ella",
-                title = "Ella 通话结束",
-                body = "通话转写完成，识别到一个家庭采购待办。",
-            ),
-            ScenarioTimelineEvent(
-                id = "ella-shopping-followup",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(16),
-                type = "incoming_sms",
-                source = "Ella",
-                title = "Ella 补充",
-                body = "刚才说的低脂牛奶和洗衣液优先，水果看你方便。",
-            ),
-            ScenarioTimelineEvent(
-                id = "kylin-downstairs-reminder",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(20),
-                type = "reminder_fired",
-                source = "System",
-                title = "送 Kylin 下楼",
-                body = "司机老陈即将到楼下。",
-            ),
-            ScenarioTimelineEvent(
-                id = "driver-kylin-picked-up",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(22),
-                type = "incoming_sms",
-                source = "Driver",
-                title = "老陈接到 Kylin",
-                body = "我已经接到 Kylin，正出发去 PetSmart。",
-            ),
-            ScenarioTimelineEvent(
-                id = "market-delivery-window",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(27),
-                type = "notification",
-                source = "Ole",
-                title = "附近超市配送",
-                body = "低脂牛奶和常用洗衣液都有货，45 分钟内可送达。",
-            ),
-            ScenarioTimelineEvent(
-                id = "driver-arrived-petsmart",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(36),
-                type = "incoming_sms",
-                source = "Driver",
-                title = "老陈送达",
-                body = "Kylin 已送到 PetSmart，店员接走了。",
-            ),
-            ScenarioTimelineEvent(
-                id = "petsmart-service-started",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(38),
-                type = "incoming_sms",
-                source = "PetSmart",
-                title = "PetSmart 到店确认",
-                body = "Kylin 已到店，正在洗澡和去浮毛，预计 14:45 完成。",
-            ),
-            ScenarioTimelineEvent(
-                id = "ella-shopping-clarify",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(45),
-                type = "incoming_sms",
-                source = "Ella",
-                title = "Ella 调整清单",
-                body = "洗衣液买常用那款就行，猫粮不用买。",
-            ),
-            ScenarioTimelineEvent(
-                id = "petsmart-service-progress",
-                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(54),
-                type = "incoming_sms",
-                source = "PetSmart",
-                title = "PetSmart 进度",
-                body = "Kylin 毛量比上次多，去浮毛会多 15 分钟，预计 15:00 左右好。",
-            ),
-        )
+        private val timelineScript: List<ScenarioTimelineEvent> by lazy {
+            systemRuntime.scenarioEvents(ONE_HOUR_SCENARIO_ID)
+                .mapNotNull { it.toScenarioTimelineEvent(INITIAL_SCENARIO_CLOCK) }
+        }
 
         private val scenario = AgentScenarioConfig(
             scenarioId = "pet-grooming",
@@ -1702,6 +1610,7 @@ class AgentExperienceViewModel
                 "petsmart-open-slot" -> createPetGroomingTask(event)
                 "driver-1320-confirm" -> handleDriverPickupConfirmation(event)
                 "ella-shopping-followup" -> handleEllaShoppingFollowup(event)
+                "property-courier-help" -> handlePropertyCourierHelp(event)
                 "driver-kylin-picked-up" -> handleDriverPickedUpKylin(event)
                 "driver-arrived-petsmart" -> handleDriverArrivedPetSmart(event)
                 "petsmart-service-started" -> handlePetSmartServiceStarted(event)
@@ -1967,8 +1876,85 @@ class AgentExperienceViewModel
 
         private fun handleRuntimeNotificationEvent(event: RuntimeNotificationEvent) {
             when (event.id) {
+                "property-parking-notice" -> handlePropertyParkingNotice(event)
+                "pharmacy-restock" -> handlePharmacyRestock(event)
                 "market-delivery-window" -> handleMarketDeliveryWindow(event)
+                "courier-coldchain-arriving" -> handleCourierColdchainArriving(event)
+                "courier-coldchain-delivered" -> handleCourierColdchainDelivered(event)
+                "health-supply-candidate" -> handleHealthSupplyCandidate(event)
             }
+        }
+
+        private fun handlePropertyParkingNotice(event: RuntimeNotificationEvent) {
+            updateTaskState(PET_TASK_ID, activate = false) { task ->
+                task.copy(
+                    updatedTimeText = blueprintTimeText(event.occurredAt),
+                    subtitle = "司机改走东门接送",
+                    taskLogs = appendTaskLogs(
+                        task.taskLogs,
+                        listOf(
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(event.occurredAt),
+                                text = "收到物业通知：${event.body}",
+                            ),
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(event.occurredAt),
+                                text = "更新司机路线：优先走东门，避开 B2 西侧临停区。",
+                            ),
+                        ),
+                    ),
+                    participants = task.participants.withParticipant(
+                        AgentParticipant("property-service", "物", "物业管家", "property_service"),
+                    ),
+                    progressLine = AgentProgressLine(
+                        label = "进行中",
+                        detail = "接送路线已更新",
+                        completed = task.progressLine.completed,
+                        total = task.progressLine.total,
+                    ),
+                )
+            }
+        }
+
+        private fun handlePharmacyRestock(event: RuntimeNotificationEvent) {
+            val task = AgentTaskState(
+                id = HEALTH_TASK_ID,
+                title = "健康补给",
+                subtitle = "常用品补货候选",
+                status = AgentTimelineStatus.RUNNING,
+                updatedTimeText = blueprintTimeText(event.occurredAt),
+                conversationItems = listOf(
+                    AgentConversationItem(
+                        id = nextId("conversation"),
+                        role = AgentConversationRole.AGENT,
+                        text = "常买的益生菌补货了，我先放进健康补给任务里，不打断你。",
+                    ),
+                ),
+                taskLogs = listOf(
+                    AgentTaskLog(
+                        id = nextId("task"),
+                        timeText = blueprintTimeText(event.occurredAt),
+                        text = "收到美团买药通知：${event.body}",
+                    ),
+                    AgentTaskLog(
+                        id = nextId("task"),
+                        timeText = blueprintTimeText(event.occurredAt),
+                        text = "新建健康补给任务：益生菌补货候选。",
+                    ),
+                ),
+                participants = listOf(
+                    AgentParticipant("pharmacy-service", "药", "美团买药", "pharmacy_service"),
+                ),
+                progressLine = AgentProgressLine(
+                    label = "进行中",
+                    detail = "等待是否合并配送",
+                    completed = 1,
+                    total = 3,
+                ),
+            )
+            upsertTask(task)
         }
 
         private fun handleMarketDeliveryWindow(event: RuntimeNotificationEvent) {
@@ -2004,6 +1990,114 @@ class AgentExperienceViewModel
                         detail = "等待清单确认",
                         completed = 3,
                         total = 4,
+                    ),
+                )
+            }
+        }
+
+        private fun handleCourierColdchainArriving(event: RuntimeNotificationEvent) {
+            val task = AgentTaskState(
+                id = PACKAGE_TASK_ID,
+                title = "冷链收货",
+                subtitle = "13:45 到达小区",
+                status = AgentTimelineStatus.RUNNING,
+                updatedTimeText = blueprintTimeText(event.occurredAt),
+                conversationItems = listOf(
+                    AgentConversationItem(
+                        id = nextId("conversation"),
+                        role = AgentConversationRole.AGENT,
+                        text = "顺丰冷链预计 13:45 到小区，我会跟进是否需要物业代收。",
+                    ),
+                ),
+                taskLogs = listOf(
+                    AgentTaskLog(
+                        id = nextId("task"),
+                        timeText = blueprintTimeText(event.occurredAt),
+                        text = "收到顺丰冷链通知：${event.body}",
+                    ),
+                    AgentTaskLog(
+                        id = nextId("task"),
+                        timeText = blueprintTimeText(event.occurredAt),
+                        text = "新建冷链收货任务，关注是否需要及时入冰柜。",
+                    ),
+                ),
+                participants = listOf(
+                    AgentParticipant("courier-coldchain", "顺", "顺丰冷链", "delivery_service"),
+                ),
+                progressLine = AgentProgressLine(
+                    label = "进行中",
+                    detail = "等待包裹到达",
+                    completed = 1,
+                    total = 3,
+                ),
+            )
+            upsertTask(task)
+        }
+
+        private fun handleCourierColdchainDelivered(event: RuntimeNotificationEvent) {
+            updateTaskState(PACKAGE_TASK_ID, activate = false) { task ->
+                task.copy(
+                    updatedTimeText = blueprintTimeText(event.occurredAt),
+                    subtitle = "已放入前台冰柜",
+                    conversationItems = appendConversation(
+                        task.conversationItems,
+                        AgentConversationRole.AGENT,
+                        "冷链包裹已经到前台冰柜了，我继续看物业是否能帮忙保管到你方便再取。",
+                    ),
+                    taskLogs = appendTaskLogs(
+                        task.taskLogs,
+                        listOf(
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(event.occurredAt),
+                                text = "收到顺丰冷链通知：${event.body}",
+                            ),
+                        ),
+                    ),
+                    progressLine = AgentProgressLine(
+                        label = "进行中",
+                        detail = "等待物业确认保管",
+                        completed = 2,
+                        total = 3,
+                    ),
+                )
+            }
+        }
+
+        private fun handlePropertyCourierHelp(event: IncomingSmsEvent) {
+            updateTaskState(PACKAGE_TASK_ID, activate = false) { task ->
+                task.copy(
+                    status = AgentTimelineStatus.DONE,
+                    updatedTimeText = blueprintTimeText(event.occurredAt),
+                    subtitle = "物业已协助保管",
+                    conversationItems = appendConversation(
+                        task.conversationItems,
+                        AgentConversationRole.AGENT,
+                        "物业可以先把冷链包裹放进前台冰柜，这条线我已经处理好了。",
+                    ),
+                    taskLogs = appendTaskLogs(
+                        task.taskLogs,
+                        listOf(
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(event.occurredAt),
+                                text = "收到物业管家的短信：${event.body}",
+                            ),
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(event.occurredAt),
+                                text = "更新状态：冷链包裹由物业前台冰柜保管。",
+                            ),
+                        ),
+                    ),
+                    participants = task.participants.withParticipant(
+                        AgentParticipant("property-service", "物", "物业管家", "property_service"),
+                    ),
+                    progressLine = AgentProgressLine(
+                        label = "完成",
+                        detail = "物业已协助保管",
+                        completed = 3,
+                        total = 3,
                     ),
                 )
             }
@@ -2150,6 +2244,41 @@ class AgentExperienceViewModel
                         detail = "继续监听完成通知",
                         completed = 6,
                         total = 7,
+                    ),
+                )
+            }
+        }
+
+        private fun handleHealthSupplyCandidate(event: RuntimeNotificationEvent) {
+            updateTaskState(HEALTH_TASK_ID, activate = false) { task ->
+                task.copy(
+                    updatedTimeText = blueprintTimeText(event.occurredAt),
+                    subtitle = "可与维生素合并配送",
+                    conversationItems = appendConversation(
+                        task.conversationItems,
+                        AgentConversationRole.AGENT,
+                        "健康补给可以和维生素 D 一起配送，我先保留候选，等你有空再确认是否下单。",
+                    ),
+                    taskLogs = appendTaskLogs(
+                        task.taskLogs,
+                        listOf(
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(event.occurredAt),
+                                text = "收到美团买药通知：${event.body}",
+                            ),
+                            AgentTaskLog(
+                                id = nextId("task"),
+                                timeText = blueprintTimeText(event.occurredAt),
+                                text = "更新健康补给候选：益生菌和维生素 D 可合并配送。",
+                            ),
+                        ),
+                    ),
+                    progressLine = AgentProgressLine(
+                        label = "等待",
+                        detail = "低优先级，稍后再问",
+                        completed = 2,
+                        total = 3,
                     ),
                 )
             }
@@ -2352,6 +2481,18 @@ class AgentExperienceViewModel
                     body = event.body,
                 )
             ).takeLast(MAX_SYSTEM_EVENTS)
+
+        private fun SystemRuntimeScriptEvent.toScenarioTimelineEvent(dayStart: LocalDateTime): ScenarioTimelineEvent? {
+            val timeValue = runCatching { LocalTime.parse(time, CLOCK_TIME_FORMATTER) }.getOrNull() ?: return null
+            return ScenarioTimelineEvent(
+                id = id,
+                triggerAt = dayStart.toLocalDate().atTime(timeValue),
+                type = type,
+                source = source,
+                title = title,
+                body = body,
+            )
+        }
 
         private fun ScenarioTimelineEvent.toSystemRuntimeEvent(): SystemRuntimeEvent =
             when (type) {
@@ -2763,8 +2904,11 @@ class AgentExperienceViewModel
             private const val CLOCK_ADVANCE_STEP_MS = 1_000L
             private const val TOOL_ROUND_LIMIT_PREFIX = "Stopped: too many tool call rounds"
             private const val SCRIPTED_ACTION_PREFIX = "MULTI:"
+            private const val ONE_HOUR_SCENARIO_ID = "one_hour_aio"
             private const val PET_TASK_ID = "pet-grooming-live"
             private const val FAMILY_TASK_ID = "family-shopping-live"
+            private const val PACKAGE_TASK_ID = "coldchain-delivery-live"
+            private const val HEALTH_TASK_ID = "health-supply-live"
             private val INITIAL_SCENARIO_CLOCK: LocalDateTime = LocalDateTime.of(2027, 4, 25, 13, 0)
             private val CLOCK_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
             private val CLOCK_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.US)

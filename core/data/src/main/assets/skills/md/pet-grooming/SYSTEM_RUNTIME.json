@@ -88,6 +88,18 @@
       }
     }
   ],
+  "paymentAmountRules": [
+    {
+      "recipientAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop", "宠物店", "洗护店", "洗澡店", "门店"],
+      "smsKeywords": ["下午五点开始"],
+      "amountCny": "CNY 218"
+    },
+    {
+      "recipientAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop", "宠物店", "洗护店", "洗澡店", "门店"],
+      "smsKeywords": ["上午九点开始"],
+      "amountCny": "CNY 316"
+    }
+  ],
   "outboundSmsGuards": [
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],

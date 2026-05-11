@@ -43,6 +43,7 @@ class AgentExperienceViewModel
         private var deferredRetriggerInProgress = false
         private var latestScenarioDecisionIntent: ScenarioDecisionIntent? = null
         private var pendingSelectedActionLabel: String? = null
+        private var lastGroomingPaymentAmount: String? = null
         private val groomingMilestones = mutableSetOf<GroomingMilestone>()
 
         private val scenario = AgentScenarioConfig(
@@ -111,6 +112,7 @@ class AgentExperienceViewModel
             continuationCount = 0
             latestScenarioDecisionIntent = null
             pendingSelectedActionLabel = null
+            lastGroomingPaymentAmount = null
             groomingMilestones.clear()
             val triggerText = buildScenarioTriggerText(scenarioClock)
             val baseFrame = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
@@ -424,6 +426,7 @@ class AgentExperienceViewModel
                 scenarioClock = nextClock
                 latestScenarioDecisionIntent = null
                 pendingSelectedActionLabel = null
+                lastGroomingPaymentAmount = null
                 groomingMilestones.clear()
                 _frame.value = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
                 deferredRetriggerInProgress = false
@@ -825,11 +828,12 @@ class AgentExperienceViewModel
         }
 
         private fun compactGroomingCompletionText(text: String): String {
-            val amount = Regex("""(?:¥|￥)\s?\d+(?:\.\d+)?|(?:cny|rmb|yuan)\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:yuan|rmb|cny|元)""", RegexOption.IGNORE_CASE)
-                .find(text)
-                ?.value
-                ?.replace(Regex("""\s+"""), "")
-                ?.let(::normalizeAmountText)
+            val amount = lastGroomingPaymentAmount
+                ?: Regex("""(?:¥|￥)\s?\d+(?:\.\d+)?|(?:cny|rmb|yuan)\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:yuan|rmb|cny|元)""", RegexOption.IGNORE_CASE)
+                    .find(text)
+                    ?.value
+                    ?.replace(Regex("""\s+"""), "")
+                    ?.let(::normalizeAmountText)
             val feeText = amount?.let { "洗护费用 $it" } ?: "洗护费用"
             return "麒麟已到家，$feeText 已支付并完成记账。"
         }
@@ -1037,13 +1041,21 @@ class AgentExperienceViewModel
                 message.startsWith("Payment completed", ignoreCase = true) -> {
                     val payment = data?.optJSONObject("payment")
                     val recipient = payment?.optString("recipient").orEmpty().ifBlank { "服务方" }
-                    val amount = payment?.optString("amount").orEmpty().ifBlank { "已确认金额" }
+                    val amount = payment?.optString("amount")
+                        .orEmpty()
+                        .takeIf { it.isNotBlank() }
+                        ?.let(::normalizeAmountText)
+                        ?: "已确认金额"
                     "向 $recipient 支付：$amount。"
                 }
                 message.startsWith("Expense recorded", ignoreCase = true) -> {
                     val expense = data?.optJSONObject("expense")
                     val merchant = expense?.optString("merchant").orEmpty().ifBlank { "服务方" }
-                    val amount = expense?.optString("amount").orEmpty().ifBlank { "已确认金额" }
+                    val amount = expense?.optString("amount")
+                        .orEmpty()
+                        .takeIf { it.isNotBlank() }
+                        ?.let(::normalizeAmountText)
+                        ?: "已确认金额"
                     "完成记账：$merchant $amount。"
                 }
                 else -> return null
@@ -1449,11 +1461,21 @@ class AgentExperienceViewModel
             val paymentStatus = data.optJSONObject("payment")?.optString("status").orEmpty()
             if (paymentStatus == "completed") {
                 groomingMilestones += GroomingMilestone.PAYMENT_COMPLETED
+                lastGroomingPaymentAmount = data.optJSONObject("payment")
+                    ?.optString("amount")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::normalizeAmountText)
+                    ?: lastGroomingPaymentAmount
             }
 
             val expenseStatus = data.optJSONObject("expense")?.optString("status").orEmpty()
             if (expenseStatus == "recorded") {
                 groomingMilestones += GroomingMilestone.EXPENSE_RECORDED
+                lastGroomingPaymentAmount = data.optJSONObject("expense")
+                    ?.optString("amount")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::normalizeAmountText)
+                    ?: lastGroomingPaymentAmount
             }
         }
 

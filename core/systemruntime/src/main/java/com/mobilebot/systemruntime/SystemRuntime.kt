@@ -228,7 +228,7 @@ class SystemRuntime
         private fun payment(params: JSONObject): SystemRuntimeResult {
             val recipient = firstText(params, "recipient", "merchant", "to", "payee", "contact")
                 .ifBlank { selectedServiceName ?: "Service Contact" }
-            val amount = amountText(params).ifBlank { "amount not specified" }
+            val amount = paymentAmountText(recipient, params).ifBlank { "amount not specified" }
             val item = mapOf(
                 "id" to "payment-${System.currentTimeMillis()}",
                 "recipient" to recipient,
@@ -242,7 +242,7 @@ class SystemRuntime
         private fun recordExpense(params: JSONObject): SystemRuntimeResult {
             val merchant = firstText(params, "merchant", "recipient", "payee", "contact")
                 .ifBlank { selectedServiceName ?: "Service Contact" }
-            val amount = amountText(params).ifBlank { "amount not specified" }
+            val amount = paymentAmountText(merchant, params).ifBlank { "amount not specified" }
             val category = params.optString("category").ifBlank { "service" }
             val note = params.optString("note")
                 .ifBlank { params.optString("description") }
@@ -277,6 +277,18 @@ class SystemRuntime
             val cents = params.optLong("amountCents", -1)
             if (cents >= 0) return "${cents / 100.0} yuan"
             return ""
+        }
+
+        private fun paymentAmountText(
+            recipient: String,
+            params: JSONObject,
+        ): String {
+            val raw = amountText(params)
+            val inbox = synchronized(smsLock) { smsInbox.toList() }
+            return paymentAmountRules()
+                .firstOrNull { it.appliesTo(recipient, params, inbox) }
+                ?.amount
+                ?: raw
         }
 
         private fun location(params: JSONObject): SystemRuntimeResult {
@@ -707,6 +719,9 @@ class SystemRuntime
         private fun outboundSmsGuards(): List<OutboundSmsGuard> =
             runtimeProfiles.flatMap { it.outboundSmsGuards }
 
+        private fun paymentAmountRules(): List<PaymentAmountRule> =
+            runtimeProfiles.flatMap { it.paymentAmountRules }
+
         private data class SmsWatch(
             val id: String,
             val contact: String,
@@ -845,6 +860,43 @@ class SystemRuntime
             }
         }
 
+        private data class PaymentAmountRule(
+            val recipientAliases: List<String>,
+            val smsKeywords: List<String>,
+            val paramKeywords: List<String>,
+            val amount: String,
+        ) {
+            fun appliesTo(
+                recipient: String,
+                params: JSONObject,
+                inbox: List<Map<String, Any?>>,
+            ): Boolean {
+                val normalizedRecipient = recipient.lowercase()
+                val recipientMatches = recipientAliases.isEmpty() ||
+                    recipientAliases.any { aliasMatches(normalizedRecipient, it) }
+                if (!recipientMatches) return false
+
+                val paramText = params.toString().lowercase()
+                val paramMatches = paramKeywords.isEmpty() ||
+                    paramKeywords.any { paramText.contains(it.trim().lowercase()) }
+                if (!paramMatches) return false
+
+                return smsKeywords.isEmpty() ||
+                    inbox.any { item ->
+                        val body = item["message"]?.toString().orEmpty().lowercase()
+                        smsKeywords.all { body.contains(it.trim().lowercase()) }
+                    }
+            }
+
+            private fun aliasMatches(
+                value: String,
+                alias: String,
+            ): Boolean {
+                val normalized = alias.trim().lowercase()
+                return normalized.isNotBlank() && (value.contains(normalized) || normalized.contains(value))
+            }
+        }
+
         private data class SmsReply(
             val message: String,
             val decisionPrompt: RuntimeDecisionPrompt?,
@@ -879,6 +931,7 @@ class SystemRuntime
             val services: List<RuntimeService>,
             val smsResponses: List<SmsResponseRule>,
             val outboundSmsGuards: List<OutboundSmsGuard>,
+            val paymentAmountRules: List<PaymentAmountRule>,
         )
 
         private fun loadRuntimeProfiles(): List<SystemRuntimeProfile> {
@@ -901,6 +954,7 @@ class SystemRuntime
                 services = parseServices(root.optJSONArray("services")),
                 smsResponses = parseSmsResponses(root.optJSONArray("smsResponses")),
                 outboundSmsGuards = parseOutboundSmsGuards(root.optJSONArray("outboundSmsGuards")),
+                paymentAmountRules = parsePaymentAmountRules(root.optJSONArray("paymentAmountRules")),
             )
 
         private fun parseContacts(arr: JSONArray?): List<SystemContact> =
@@ -1021,6 +1075,24 @@ class SystemRuntime
                             untilKeywords = until?.optStringList("keywords").orEmpty(),
                             message = message,
                             instruction = obj.optString("instruction").ifBlank { message },
+                        ),
+                    )
+                }
+            }
+
+        private fun parsePaymentAmountRules(arr: JSONArray?): List<PaymentAmountRule> =
+            buildList {
+                if (arr == null) return@buildList
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val amount = obj.optString("amount").ifBlank { obj.optString("amountCny") }.trim()
+                    if (amount.isBlank()) continue
+                    add(
+                        PaymentAmountRule(
+                            recipientAliases = obj.optStringList("recipientAliases"),
+                            smsKeywords = obj.optStringList("smsKeywords"),
+                            paramKeywords = obj.optStringList("paramKeywords"),
+                            amount = amount,
                         ),
                     )
                 }

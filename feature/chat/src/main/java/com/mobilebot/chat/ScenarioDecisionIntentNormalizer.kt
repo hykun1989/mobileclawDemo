@@ -220,7 +220,7 @@ sealed class ScenarioDecisionIntent(
         override fun agentText(rawText: String): String =
             """
             $command
-            NEXT_OPERATION: Send PetSmart an SMS asking whether tomorrow after 17:00 can be booked as a bath-only slot for Kylin, then call system_wait_for_sms for PetSmart's reply. Do not repeat the previous options before the new PetSmart SMS is received.
+            NEXT_OPERATION: The next assistant step must be a tool call, not user-facing prose. Call system_send_sms to PetSmart with this exact Chinese message: `请问明天下午5点以后可以只安排基础洗澡服务吗？` Then call system_wait_for_sms for PetSmart's reply. Do not repeat the previous options before the new PetSmart SMS is received. Do not write English words such as booking or bath-only in the SMS body.
             """.trimIndent()
     }
 

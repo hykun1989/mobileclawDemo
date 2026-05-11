@@ -119,6 +119,13 @@
     },
     {
       "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
+      "messageKeywords": ["洗澡-only", "bath-only", "only档期"],
+      "message": "短信暂未发送：询问下午洗澡档期时必须使用自然中文，不要混入英文术语。",
+      "instruction": "重新发送给 PetSmart 的短信：请问明天下午5点以后可以只安排基础洗澡服务吗？",
+      "replacementMessage": "请问明天下午5点以后可以只安排基础洗澡服务吗？"
+    },
+    {
+      "contactAliases": ["PetSmart", "Pet Smart", "pet salon", "grooming shop", "selected grooming shop"],
       "messageKeywords": ["CNY", "RMB", "价格", "费用", "合计", "总计", "¥", "￥", "元"],
       "message": "短信暂未发送：价格使用宠物店查询服务返回的公开价格，短信只确认档期、服务内容和预约状态。",
       "instruction": "重新发送给 PetSmart 的短信，只确认周日9点、Kylin 的洗澡和去浮毛服务，不要包含价格、费用、合计或 CNY。"

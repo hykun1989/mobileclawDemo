@@ -57,8 +57,10 @@ class AgentExperienceViewModel
         private var clockMode = ScenarioClockMode.Live
         private var normalClockElapsedMs = 0L
         private var petGroomingAccepted = false
+        private var taskSortCounter = 0L
         private val deliveredTimelineEvents = mutableSetOf<String>()
         private val taskStates = linkedMapOf<String, AgentTaskState>()
+        private val pinnedTaskIds = linkedSetOf<String>()
         private val groomingMilestones = mutableSetOf<GroomingMilestone>()
         private val timelineScript = listOf(
             ScenarioTimelineEvent(
@@ -244,7 +246,20 @@ class AgentExperienceViewModel
             taskStates[_frame.value.activeTaskId]?.let {
                 taskStates[it.id] = _frame.value.captureTaskState(it)
             }
-            _frame.update { task.applyToFrame(it) }
+            val selected = task.copy(sortKey = nextTaskSortKey())
+            taskStates[taskId] = selected
+            _frame.update { selected.applyToFrame(it) }
+        }
+
+        fun toggleTaskPinned(taskId: String) {
+            if (taskId in pinnedTaskIds) {
+                pinnedTaskIds.remove(taskId)
+            } else {
+                pinnedTaskIds.add(taskId)
+            }
+            _frame.update { frame ->
+                frame.copy(taskCards = taskCardsFor(activeId = frame.activeTaskId))
+            }
         }
 
         private fun continueWithNormalizedDecision(
@@ -1908,8 +1923,9 @@ class AgentExperienceViewModel
             taskStates[_frame.value.activeTaskId]?.let {
                 taskStates[it.id] = _frame.value.captureTaskState(it)
             }
-            taskStates[task.id] = task
-            _frame.update { task.applyToFrame(it) }
+            val updatedTask = task.copy(sortKey = nextTaskSortKey())
+            taskStates[updatedTask.id] = updatedTask
+            _frame.update { updatedTask.applyToFrame(it) }
         }
 
         private fun updateTaskState(
@@ -1918,13 +1934,13 @@ class AgentExperienceViewModel
             transform: (AgentTaskState) -> AgentTaskState,
         ) {
             val existing = taskStates[taskId] ?: return
-            val updated = transform(existing)
+            val updated = transform(existing).copy(sortKey = nextTaskSortKey())
             taskStates[taskId] = updated
             if (activate || _frame.value.activeTaskId == taskId) {
                 _frame.update { updated.applyToFrame(it) }
             } else {
                 _frame.update { frame ->
-                    frame.copy(taskCards = taskStates.values.map { it.toCard(activeId = frame.activeTaskId) })
+                    frame.copy(taskCards = taskCardsFor(activeId = frame.activeTaskId))
                 }
             }
         }
@@ -1948,7 +1964,7 @@ class AgentExperienceViewModel
                 activeTaskId = id,
                 activeTaskTitle = title,
                 activeTaskSubtitle = subtitle,
-                taskCards = taskStates.values.map { it.toCard(activeId = id) },
+                taskCards = taskCardsFor(activeId = id),
                 statusLabel = when (status) {
                     AgentTimelineStatus.BLOCKED -> "Waiting for decision"
                     AgentTimelineStatus.DONE -> "Complete"
@@ -1968,6 +1984,14 @@ class AgentExperienceViewModel
                 error = error,
             )
 
+        private fun taskCardsFor(activeId: String?): List<AgentTaskCard> =
+            taskStates.values
+                .map { it.toCard(activeId = activeId) }
+                .sortedWith(
+                    compareByDescending<AgentTaskCard> { it.isPinned }
+                        .thenByDescending { it.sortKey },
+                )
+
         private fun AgentTaskState.toCard(activeId: String?): AgentTaskCard =
             AgentTaskCard(
                 id = id,
@@ -1975,8 +1999,15 @@ class AgentExperienceViewModel
                 subtitle = subtitle,
                 status = status,
                 updatedTimeText = updatedTimeText,
+                sortKey = sortKey,
                 isActive = id == activeId,
+                isPinned = id in pinnedTaskIds,
             )
+
+        private fun nextTaskSortKey(): Long {
+            taskSortCounter += 1
+            return taskSortCounter
+        }
 
         private fun appendSystemEvent(
             existing: List<AgentSystemEvent>,

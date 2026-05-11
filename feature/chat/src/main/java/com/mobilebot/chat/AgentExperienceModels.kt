@@ -31,7 +31,9 @@ data class AgentTaskCard(
     val subtitle: String,
     val status: AgentTimelineStatus,
     val updatedTimeText: String,
+    val sortKey: Long = 0L,
     val isActive: Boolean = false,
+    val isPinned: Boolean = false,
 )
 
 data class AgentTaskState(
@@ -40,6 +42,7 @@ data class AgentTaskState(
     val subtitle: String,
     val status: AgentTimelineStatus = AgentTimelineStatus.RUNNING,
     val updatedTimeText: String,
+    val sortKey: Long = 0L,
     val conversationItems: List<AgentConversationItem> = emptyList(),
     val taskLogs: List<AgentTaskLog> = emptyList(),
     val participants: List<AgentParticipant> = emptyList(),

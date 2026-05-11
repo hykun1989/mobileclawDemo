@@ -3,6 +3,7 @@ package com.mobilebot.chat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +70,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,7 +106,14 @@ fun AgentExperienceScreen(
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            TraceDrawer(frame.debugTrace)
+            TaskSidebar(
+                tasks = frame.taskCards,
+                onSelectTask = { taskId ->
+                    viewModel.selectTask(taskId)
+                    scope.launch { drawerState.close() }
+                },
+                onToggleTaskPinned = viewModel::toggleTaskPinned,
+            )
         },
     ) {
         Surface(
@@ -119,7 +128,7 @@ fun AgentExperienceScreen(
                 blueprintOpen = blueprintOpen,
                 onOpenBlueprint = { blueprintOpen = true },
                 onCollapseBlueprint = { blueprintOpen = false },
-                onOpenTrace = { scope.launch { drawerState.open() } },
+                onOpenTaskSidebar = { scope.launch { drawerState.open() } },
                 onOpenSettings = onOpenSettings,
                 onOpenChat = onOpenChat,
                 onAccelerateClock = viewModel::accelerateClockUntilNextEvent,
@@ -139,7 +148,7 @@ private fun PhoneFlowCanvas(
     blueprintOpen: Boolean,
     onOpenBlueprint: () -> Unit,
     onCollapseBlueprint: () -> Unit,
-    onOpenTrace: () -> Unit,
+    onOpenTaskSidebar: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenChat: () -> Unit,
     onAccelerateClock: () -> Unit,
@@ -161,7 +170,7 @@ private fun PhoneFlowCanvas(
                     frame = frame,
                     onOpenBlueprint = onOpenBlueprint,
                     onAccelerateClock = onAccelerateClock,
-                    onOpenTrace = onOpenTrace,
+                    onOpenTaskSidebar = onOpenTaskSidebar,
                     onOpenSettings = onOpenSettings,
                 )
             }
@@ -231,7 +240,7 @@ private fun PhoneFlowCanvas(
 @Composable
 private fun TimeHeader(
     frame: AgentExperienceFrame,
-    onOpenTrace: () -> Unit,
+    onOpenTaskSidebar: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenBlueprint: () -> Unit,
     onAccelerateClock: () -> Unit,
@@ -249,8 +258,8 @@ private fun TimeHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onOpenTrace) {
-                Icon(Icons.Default.Menu, contentDescription = "Execution trace", tint = AgentWhite)
+            IconButton(onClick = onOpenTaskSidebar) {
+                Icon(Icons.Default.Menu, contentDescription = "任务", tint = AgentWhite)
             }
             Column(
                 modifier = Modifier.weight(1f),
@@ -1547,36 +1556,110 @@ private fun PillToolButton(
 }
 
 @Composable
-private fun TraceDrawer(trace: List<String>) {
+private fun TaskSidebar(
+    tasks: List<AgentTaskCard>,
+    onSelectTask: (String) -> Unit,
+    onToggleTaskPinned: (String) -> Unit,
+) {
     ModalDrawerSheet(
         drawerContainerColor = AgentPanel,
         drawerContentColor = AgentWhite,
     ) {
         Text(
-            text = "Execution Trace",
+            text = "任务",
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             color = AgentWhite,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
         )
         HorizontalDivider(color = AgentWhite.copy(alpha = 0.18f))
-        if (trace.isEmpty()) {
+        if (tasks.isEmpty()) {
             Text(
-                text = "No trace yet.",
+                text = "暂无任务",
                 modifier = Modifier.padding(20.dp),
                 color = AgentMuted,
             )
         } else {
-            LazyColumn(contentPadding = PaddingValues(12.dp)) {
-                items(trace) { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AgentMuted,
-                        modifier = Modifier.padding(vertical = 5.dp),
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(tasks, key = { it.id }) { task ->
+                    SidebarTaskCard(
+                        task = task,
+                        onSelectTask = { onSelectTask(task.id) },
+                        onTogglePinned = { onToggleTaskPinned(task.id) },
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SidebarTaskCard(
+    task: AgentTaskCard,
+    onSelectTask: () -> Unit,
+    onTogglePinned: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(task.id, task.isPinned) {
+                detectTapGestures(
+                    onTap = { onSelectTask() },
+                    onLongPress = { onTogglePinned() },
+                )
+            },
+        color = if (task.isActive) AgentPanelActive else AgentBlack.copy(alpha = 0.46f),
+        contentColor = AgentWhite,
+        shape = RoundedCornerShape(8.dp),
+        border = if (task.isActive) BorderStroke(1.dp, AgentWhite.copy(alpha = 0.36f)) else null,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = task.title,
+                    color = AgentWhite,
+                    fontSize = 15.sp,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (task.isPinned) {
+                    Text(
+                        text = "置顶",
+                        color = Color(0xFF68C8FF),
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+            Text(
+                text = task.subtitle,
+                color = AgentMuted,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = task.updatedTimeText,
+                color = AgentWhite.copy(alpha = 0.56f),
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                maxLines = 1,
+            )
         }
     }
 }

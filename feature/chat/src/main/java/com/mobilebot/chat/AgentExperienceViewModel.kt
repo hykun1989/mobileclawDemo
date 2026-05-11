@@ -1328,7 +1328,11 @@ class AgentExperienceViewModel
                 message.startsWith("Contacts returned", ignoreCase = true) -> {
                     val names = contactNamesFromData(data)
                     if (names.contains("Driver")) {
-                        LocalDateTime.of(2027, 4, 25, 13, 5)
+                        if (selectedAppointmentIsAfternoon()) {
+                            LocalDateTime.of(2027, 4, 25, 13, 8)
+                        } else {
+                            LocalDateTime.of(2027, 4, 25, 13, 5)
+                        }
                     } else {
                         LocalDateTime.of(2027, 4, 25, 13, 3)
                     }
@@ -1355,9 +1359,12 @@ class AgentExperienceViewModel
             body: String,
         ): LocalDateTime? =
             when {
-                contact.contains("PetSmart", ignoreCase = true) &&
-                    (body.contains("确认预约") || body.contains("确认约") || body.contains("确认周日") || body.contains("确认本周日")) ->
-                    LocalDateTime.of(2027, 4, 25, 13, 4)
+                contact.contains("PetSmart", ignoreCase = true) && isPetSmartBookingConfirmation(body) ->
+                    if (selectedAppointmentIsAfternoon() || body.contains("下午") || body.contains("5点") || body.contains("五点")) {
+                        LocalDateTime.of(2027, 4, 25, 13, 6)
+                    } else {
+                        LocalDateTime.of(2027, 4, 25, 13, 4)
+                    }
                 contact.contains("PetSmart", ignoreCase = true) && body.contains("9:00") ->
                     LocalDateTime.of(2027, 4, 25, 13, 2)
                 contact.contains("PetSmart", ignoreCase = true) && (body.contains("下午") || body.contains("5点")) ->
@@ -1366,7 +1373,7 @@ class AgentExperienceViewModel
                     LocalDateTime.of(2027, 4, 25, 13, 5)
                 contact.contains("Driver", ignoreCase = true) &&
                     (body.contains("16:30") || body.contains("17:00") || body.contains("下午")) ->
-                    LocalDateTime.of(2027, 4, 25, 13, 5)
+                    LocalDateTime.of(2027, 4, 25, 13, 8)
                 contact.contains("Driver", ignoreCase = true) && (body.contains("19:20") || body.contains("七点二十")) ->
                     LocalDateTime.of(2027, 4, 26, 19, 20)
                 contact.contains("Driver", ignoreCase = true) && (body.contains("到家") || body.contains("home", ignoreCase = true)) ->
@@ -1382,8 +1389,14 @@ class AgentExperienceViewModel
             when {
                 eventType == "petsmart_availability_options" ->
                     LocalDateTime.of(2027, 4, 25, 13, 3)
+                eventType == "petsmart_afternoon_bath_only" ->
+                    LocalDateTime.of(2027, 4, 25, 13, 5)
                 eventType == "petsmart_booking_confirmed" ->
-                    LocalDateTime.of(2027, 4, 25, 13, 4)
+                    if (selectedAppointmentIsAfternoon() || body.contains("下午") || body.contains("五点") || body.contains("5点")) {
+                        LocalDateTime.of(2027, 4, 25, 13, 7)
+                    } else {
+                        LocalDateTime.of(2027, 4, 25, 13, 4)
+                    }
                 eventType == "petsmart_arrival_confirmed" ->
                     selectedAppointmentArrivalClock()
                 eventType == "petsmart_delayed_pickup" ->
@@ -1423,6 +1436,17 @@ class AgentExperienceViewModel
                     LocalDateTime.of(2027, 4, 26, 20, 0)
                 else -> null
             }
+
+        private fun isPetSmartBookingConfirmation(body: String): Boolean =
+            body.contains("确认") &&
+                (body.contains("预约") ||
+                    body.contains("约") ||
+                    body.contains("明天") ||
+                    body.contains("周日") ||
+                    body.contains("下午") ||
+                    body.contains("5点") ||
+                    body.contains("五点") ||
+                    body.contains("17:00"))
 
         private fun scenarioClockForNotification(data: JSONObject?): LocalDateTime? {
             val notification = data?.optJSONObject("notification") ?: return null

@@ -893,6 +893,9 @@ class AgentExperienceViewModel
                 text.contains("稍后将等待") ||
                 text.contains("稍后将自动处理") ||
                 text.contains("已向 PetSmart 发送") ||
+                text.contains("已向 Harbor Paws Salon 发送") ||
+                text.contains("接下来将等待") ||
+                text.contains("之后立即联系司机") ||
                 text.contains("发送预约咨询短信") ||
                 text.contains("详细信息已加载") ||
                 (text.contains("Driver 已识别") && text.contains("PetSmart")) ||
@@ -938,8 +941,9 @@ class AgentExperienceViewModel
                         text.contains("payment completed") ||
                         text.contains("closed loop") ||
                         text.contains("流程闭环") ||
+                        text.contains("全流程已完成") ||
                         text.contains("全流程完成") ||
-                        (text.contains("支付") && (text.contains("记账") || text.contains("账务")))
+                        (text.contains("支付") && (text.contains("记账") || text.contains("账务") || text.contains("费用已记入") || text.contains("已记入")))
                 ) &&
                 (text.contains("到家") || text.contains("已接回") || text.contains("接回") || text.contains("home")) &&
                 (text.contains("kylin") || text.contains("麒麟"))
@@ -1163,7 +1167,9 @@ class AgentExperienceViewModel
                     val reminder = data?.optJSONObject("reminder")
                     val title = reminder?.optString("title").orEmpty().ifBlank { "提醒" }
                     val body = displayReminderBody(reminder?.optString("body").orEmpty())
-                    val scheduledFor = reminder?.optString("scheduledFor").orEmpty().ifBlank { "按计划时间" }
+                    val scheduledFor = displayReminderTime(
+                        reminder?.optString("scheduledFor").orEmpty().ifBlank { "按计划时间" },
+                    )
                     "新建长提醒：$scheduledFor $title${body.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()}"
                 }
                 message.startsWith("Phone call connected", ignoreCase = true) -> message
@@ -1393,15 +1399,26 @@ class AgentExperienceViewModel
             } ?: return null
             val title = source.optString("title").ifBlank { "提醒" }
             val body = displayReminderBody(source.optString("body").ifBlank { title })
-            val timeText = source.optString("scheduledFor")
+            val timeText = displayReminderTime(source.optString("scheduledFor")
                 .ifBlank { source.optString("time") }
-                .ifBlank { "Now" }
+                .ifBlank { "Now" })
             return AgentSystemNotification(
                 id = nextId("notice"),
                 title = title,
                 timeText = timeText,
                 body = body,
             )
+        }
+
+        private fun displayReminderTime(raw: String): String {
+            val value = raw.trim()
+            val match = Regex("""^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})""").find(value)
+            return if (match != null) {
+                val (_, month, day, hour, minute) = match.destructured
+                "$month/$day $hour:$minute"
+            } else {
+                value
+            }
         }
 
         private fun selectedGroomingShopName(): String =

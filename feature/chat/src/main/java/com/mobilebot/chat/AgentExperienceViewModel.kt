@@ -1260,14 +1260,24 @@ class AgentExperienceViewModel
 
         private fun notificationFromDeviceResult(content: String): AgentSystemNotification? {
             val message = content.substringBefore('\n').trim()
-            if (!message.startsWith("Notification posted", ignoreCase = true)) return null
-            val notification = parseToolData(content)?.optJSONObject("notification") ?: return null
-            val title = notification.optString("title").ifBlank { "Reminder" }
-            val body = notification.optString("body").ifBlank { title }
+            val data = parseToolData(content) ?: return null
+            val source = when {
+                message.startsWith("Notification posted", ignoreCase = true) ->
+                    data.optJSONObject("notification")
+                message.startsWith("Long reminder created", ignoreCase = true) ||
+                    message.startsWith("Reminder created", ignoreCase = true) ->
+                    data.optJSONObject("reminder")
+                else -> null
+            } ?: return null
+            val title = source.optString("title").ifBlank { "提醒" }
+            val body = source.optString("body").ifBlank { title }
+            val timeText = source.optString("scheduledFor")
+                .ifBlank { source.optString("time") }
+                .ifBlank { "Now" }
             return AgentSystemNotification(
                 id = nextId("notice"),
                 title = title,
-                timeText = "Now",
+                timeText = timeText,
                 body = body,
             )
         }

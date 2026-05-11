@@ -1081,7 +1081,25 @@ class AgentExperienceViewModel
         }
 
         fun dismissSystemNotification() {
-            _frame.update { it.copy(systemNotification = null) }
+            _frame.update { frame ->
+                val notification = frame.systemNotification
+                val call = if (notification?.actionLabel == "接听") {
+                    // 接听后保留通话态，直到系统通话结束事件到达
+                    AgentActiveCall(
+                        id = notification.id,
+                        caller = notification.title.removeSuffix(" 来电"),
+                        startedTimeText = notification.timeText,
+                        statusText = "正在通话",
+                        transcriptText = "通话转写中",
+                    )
+                } else {
+                    frame.activeCall
+                }
+                frame.copy(
+                    systemNotification = null,
+                    activeCall = call,
+                )
+            }
         }
 
         private fun toolStartEvent(tool: String): AgentTimelineEvent {
@@ -1845,6 +1863,7 @@ class AgentExperienceViewModel
                     total = 3,
                 ),
             )
+            _frame.update { it.copy(activeCall = null) }
             upsertTask(task)
         }
 

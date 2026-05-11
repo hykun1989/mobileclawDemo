@@ -156,11 +156,7 @@ private fun PhoneFlowCanvas(
             .imePadding(),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (blueprintOpen) {
-                BlueprintDeck(
-                    frame = frame,
-                )
-            } else {
+            if (!blueprintOpen) {
                 TimeHeader(
                     frame = frame,
                     onOpenBlueprint = onOpenBlueprint,
@@ -169,28 +165,44 @@ private fun PhoneFlowCanvas(
                     onOpenSettings = onOpenSettings,
                 )
             }
-            if (frame.activeTaskId == null) {
-                WorkbenchArea(
-                    frame = frame,
-                    onSelectTask = onSelectTask,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 28.dp)
-                        .padding(top = if (blueprintOpen) 10.dp else 14.dp),
-                )
-            } else {
-                SessionArea(
-                    frame = frame,
-                    blueprintOpen = blueprintOpen,
-                    onCollapseBlueprint = onCollapseBlueprint,
-                    onSelectTask = onSelectTask,
-                    onStart = onStart,
-                    onAction = onAction,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 28.dp)
-                        .padding(top = if (blueprintOpen) 10.dp else 14.dp),
-                )
+            Box(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (blueprintOpen) {
+                        BlueprintDeck(
+                            frame = frame,
+                        )
+                    }
+                    if (frame.activeTaskId == null) {
+                        WorkbenchArea(
+                            frame = frame,
+                            onSelectTask = onSelectTask,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 28.dp)
+                                .padding(top = if (blueprintOpen) 10.dp else 14.dp),
+                        )
+                    } else {
+                        SessionArea(
+                            frame = frame,
+                            blueprintOpen = blueprintOpen,
+                            onCollapseBlueprint = onCollapseBlueprint,
+                            onSelectTask = onSelectTask,
+                            onStart = onStart,
+                            onAction = onAction,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 28.dp)
+                                .padding(top = if (blueprintOpen) 10.dp else 14.dp),
+                        )
+                    }
+                }
+                frame.activeCall?.let { activeCall ->
+                    ActiveCallOverlay(
+                        call = activeCall,
+                        currentTimeText = frame.clockTimeText,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             if (frame.activeTaskId != null) {
                 TaskProgressStrip(
@@ -1372,6 +1384,121 @@ private fun SystemNotificationOverlay(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ActiveCallOverlay(
+    call: AgentActiveCall,
+    currentTimeText: String,
+    modifier: Modifier = Modifier,
+) {
+    val pulse by rememberInfiniteTransition(label = "call_pulse").animateFloat(
+        initialValue = 0.42f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+        ),
+        label = "call_pulse_alpha",
+    )
+    Box(
+        modifier = modifier
+            .background(AgentBlack.copy(alpha = 0.93f))
+            .padding(horizontal = 28.dp)
+            .testTag("active_call"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(96.dp),
+                color = AgentPanelActive,
+                contentColor = AgentWhite,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, Color(0xFF68C8FF).copy(alpha = pulse)),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = call.caller.take(1),
+                        color = AgentWhite,
+                        fontSize = 36.sp,
+                        lineHeight = 40.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+            Text(
+                text = call.caller,
+                color = AgentWhite,
+                fontSize = 28.sp,
+                lineHeight = 34.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = call.statusText,
+                color = AgentWhite.copy(alpha = 0.74f),
+                fontSize = 15.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "${call.startedTimeText} 接通 · 当前 $currentTimeText",
+                color = AgentMuted,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                textAlign = TextAlign.Center,
+            )
+            Surface(
+                color = AgentPanel,
+                contentColor = AgentWhite,
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(1.dp, AgentWhite.copy(alpha = 0.16f)),
+            ) {
+                Text(
+                    text = call.transcriptText,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp),
+                    color = AgentWhite.copy(alpha = 0.88f),
+                    fontSize = 14.sp,
+                    lineHeight = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CallControlChip("静音")
+                CallControlChip("转写")
+                CallControlChip("免提")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallControlChip(text: String) {
+    Surface(
+        modifier = Modifier
+            .width(72.dp)
+            .height(44.dp),
+        color = AgentPanel,
+        contentColor = AgentWhite,
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = text,
+                color = AgentWhite.copy(alpha = 0.78f),
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }

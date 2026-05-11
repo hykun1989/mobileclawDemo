@@ -105,6 +105,14 @@ data class AgentSystemNotification(
     val actionLabel: String = "OK",
 )
 
+data class AgentActiveCall(
+    val id: String,
+    val caller: String,
+    val startedTimeText: String,
+    val statusText: String,
+    val transcriptText: String,
+)
+
 data class AgentProgressLine(
     val label: String,
     val detail: String,
@@ -142,6 +150,7 @@ data class AgentExperienceFrame(
     val taskLogs: List<AgentTaskLog> = emptyList(),
     val participants: List<AgentParticipant> = emptyList(),
     val systemNotification: AgentSystemNotification? = null,
+    val activeCall: AgentActiveCall? = null,
     val progressLine: AgentProgressLine = AgentProgressLine(
         label = statusLabel,
         detail = "Ready",

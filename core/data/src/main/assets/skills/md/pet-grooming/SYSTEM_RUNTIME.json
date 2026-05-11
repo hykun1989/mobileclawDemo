@@ -366,10 +366,10 @@
     },
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-      "keywords": ["delivery-to-petsmart", "delivered", "arrived at", "drop off", "送到", "送达", "已送达", "到店", "抵达"],
+      "keywords": ["PetSmart", "Pet Smart", "delivery-to-petsmart", "送到 PetSmart", "送达 PetSmart", "到 PetSmart"],
       "excludeKeywords": ["8:30", "请到家", "上门接", "接麒麟", "接 Kylin", "接kylin", "到家接"],
       "eventType": "driver_delivered_to_petsmart",
-      "reply": "Kylin 送到了。"
+      "reply": "Kylin 已送到 PetSmart。"
     },
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],

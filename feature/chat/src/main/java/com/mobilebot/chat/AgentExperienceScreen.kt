@@ -246,10 +246,16 @@ private fun TimeHeader(
 private fun BlueprintDeck(
     frame: AgentExperienceFrame,
 ) {
-    val logListState = rememberLazyListState()
-    LaunchedEffect(frame.taskLogs.size) {
-        if (frame.taskLogs.isNotEmpty()) {
-            logListState.animateScrollToItem(frame.taskLogs.lastIndex)
+    val latestLogIndex = frame.taskLogs.lastIndex.coerceAtLeast(0)
+    val latestLogKey = frame.taskLogs.lastOrNull()?.let { row ->
+        "${row.id}:${row.timeText}:${row.text}"
+    }
+    val logListState = rememberLazyListState(initialFirstVisibleItemIndex = latestLogIndex)
+
+    LaunchedEffect(latestLogKey) {
+        val lastIndex = frame.taskLogs.lastIndex
+        if (lastIndex >= 0) {
+            logListState.animateScrollToItem(lastIndex)
         }
     }
 
@@ -311,7 +317,7 @@ private fun BlueprintDeck(
                     contentPadding = PaddingValues(bottom = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(13.dp),
                 ) {
-                    items(frame.taskLogs) { row ->
+                    items(frame.taskLogs, key = { it.id }) { row ->
                         TaskLogRow(row)
                     }
                 }

@@ -248,7 +248,10 @@ private fun PhoneFlowCanvas(
             onClick = onOpenBlueprint,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 112.dp, end = 86.dp)
+                .padding(
+                    top = if (blueprintOpen) 264.dp else 132.dp,
+                    end = 18.dp,
+                )
                 .zIndex(100f),
         )
     }

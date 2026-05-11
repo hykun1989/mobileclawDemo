@@ -225,7 +225,7 @@
       "priority": 120,
       "blockedUntil": {
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-        "keywords": ["Harbor Paws", "送到 Harbor", "已送到 Harbor", "delivered to Harbor"]
+        "keywords": ["已送到 Harbor", "Kylin 已送到 Harbor", "delivered to Harbor"]
       },
       "blockedReply": "暂不能读取 Harbor Paws Salon 的到店更新：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。下一步请等待 Driver delivery-to-shop update for Harbor Paws Salon。",
       "eventType": "selected_shop_arrival_confirmed",
@@ -237,7 +237,7 @@
       "priority": 120,
       "blockedUntil": {
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-        "keywords": ["Harbor Paws", "送到 Harbor", "已送到 Harbor", "delivered to Harbor"]
+        "keywords": ["已送到 Harbor", "Kylin 已送到 Harbor", "delivered to Harbor"]
       },
       "blockedReply": "暂不能读取 Harbor Paws Salon 的进度：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。下一步请等待 Driver delivery-to-shop update for Harbor Paws Salon。",
       "eventType": "selected_shop_delayed_pickup",
@@ -249,7 +249,7 @@
       "priority": 120,
       "blockedUntil": {
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-        "keywords": ["Harbor Paws", "送到 Harbor", "已送到 Harbor", "delivered to Harbor"]
+        "keywords": ["已送到 Harbor", "Kylin 已送到 Harbor", "delivered to Harbor"]
       },
       "blockedReply": "暂不能读取 Harbor Paws Salon 的完成更新：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。下一步请等待 Driver delivery-to-shop update for Harbor Paws Salon。",
       "eventType": "selected_shop_grooming_finished",
@@ -323,7 +323,7 @@
       "keywords": ["arrived", "delivered", "drop off", "送到", "到店"],
       "blockedUntil": {
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-        "keywords": ["PetSmart", "送到 PetSmart", "已送到 PetSmart", "delivered to PetSmart"]
+        "keywords": ["已送到 PetSmart", "Kylin 已送到 PetSmart", "delivered to PetSmart"]
       },
       "blockedReply": "暂不能读取 PetSmart 的到店更新：需要先收到 Driver 已送到 PetSmart 的确认。下一步请等待 Driver delivery-to-shop update for PetSmart。",
       "eventType": "petsmart_arrival_confirmed",
@@ -334,7 +334,7 @@
       "keywords": ["progress", "delay", "status", "进度", "延迟", "晚一点"],
       "blockedUntil": {
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-        "keywords": ["PetSmart", "送到 PetSmart", "已送到 PetSmart", "delivered to PetSmart"]
+        "keywords": ["已送到 PetSmart", "Kylin 已送到 PetSmart", "delivered to PetSmart"]
       },
       "blockedReply": "暂不能读取 PetSmart 的进度：需要先收到 Driver 已送到 PetSmart 的确认。下一步请等待 Driver delivery-to-shop update for PetSmart。",
       "eventType": "petsmart_delayed_pickup",
@@ -345,7 +345,7 @@
       "keywords": ["finished", "ready", "pickup", "pick up", "complete", "洗完", "接"],
       "blockedUntil": {
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-        "keywords": ["PetSmart", "送到 PetSmart", "已送到 PetSmart", "delivered to PetSmart"]
+        "keywords": ["已送到 PetSmart", "Kylin 已送到 PetSmart", "delivered to PetSmart"]
       },
       "blockedReply": "暂不能读取 PetSmart 的完成更新：需要先收到 Driver 已送到 PetSmart 的确认。下一步请等待 Driver delivery-to-shop update for PetSmart。",
       "eventType": "petsmart_grooming_finished",

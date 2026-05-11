@@ -943,10 +943,11 @@ class AgentExperienceViewModel
                         text.contains("流程闭环") ||
                         text.contains("全流程已完成") ||
                         text.contains("全流程完成") ||
+                        text.contains("全流程顺利完成") ||
                         text.contains("全部完成") ||
-                        (text.contains("支付") && (text.contains("记账") || text.contains("账务") || text.contains("支付与记账") || text.contains("费用已记入") || text.contains("已记入")))
+                        (text.contains("支付") && (text.contains("记账") || text.contains("账务") || text.contains("支付与记账") || text.contains("支付及记账") || text.contains("费用已记入") || text.contains("已记入")))
                 ) &&
-                (text.contains("到家") || text.contains("已接回") || text.contains("接回") || text.contains("home")) &&
+                (text.contains("到家") || text.contains("安全到家") || text.contains("已接回") || text.contains("接回") || text.contains("home")) &&
                 (text.contains("kylin") || text.contains("麒麟"))
 
         private fun isRoutineReminderQuestion(text: String): Boolean {

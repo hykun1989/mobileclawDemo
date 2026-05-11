@@ -1080,7 +1080,7 @@ class AgentExperienceViewModel
                     message.startsWith("Reminder created", ignoreCase = true) -> {
                     val reminder = data?.optJSONObject("reminder")
                     val title = reminder?.optString("title").orEmpty().ifBlank { "提醒" }
-                    val body = reminder?.optString("body").orEmpty()
+                    val body = displayReminderBody(reminder?.optString("body").orEmpty())
                     val scheduledFor = reminder?.optString("scheduledFor").orEmpty().ifBlank { "按计划时间" }
                     "新建长提醒：$scheduledFor $title${body.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()}"
                 }
@@ -1313,7 +1313,7 @@ class AgentExperienceViewModel
                 else -> null
             } ?: return null
             val title = source.optString("title").ifBlank { "提醒" }
-            val body = source.optString("body").ifBlank { title }
+            val body = displayReminderBody(source.optString("body").ifBlank { title })
             val timeText = source.optString("scheduledFor")
                 .ifBlank { source.optString("time") }
                 .ifBlank { "Now" }
@@ -1324,6 +1324,19 @@ class AgentExperienceViewModel
                 body = body,
             )
         }
+
+        private fun displayReminderBody(raw: String): String =
+            if (
+                scenario.scenarioId == "pet-grooming" &&
+                selectedAppointmentIsAfternoon() &&
+                raw.contains("司机") &&
+                raw.contains("PetSmart") &&
+                raw.contains("5:00前")
+            ) {
+                raw.replace("5:00前送达 PetSmart", "17:00前送达 PetSmart")
+            } else {
+                raw
+            }
 
         private fun AgentExperienceFrame.withScenarioEventClock(
             tool: String,

@@ -227,7 +227,7 @@
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
         "keywords": ["已送到 Harbor", "Kylin 已送到 Harbor", "delivered to Harbor"]
       },
-      "blockedReply": "暂不能读取 Harbor Paws Salon 的到店更新：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。下一步请等待 Driver delivery-to-shop update for Harbor Paws Salon。",
+      "blockedReply": "暂不能读取 Harbor Paws Salon 的到店更新：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。不要给 Driver 重新发送首段接送短信；下一步直接调用 system_wait_for_sms，from=Driver，context=等待 Driver 确认 Kylin 已送到 Harbor Paws Salon。",
       "eventType": "selected_shop_arrival_confirmed",
       "reply": "Kylin 已经到店。"
     },
@@ -239,7 +239,7 @@
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
         "keywords": ["已送到 Harbor", "Kylin 已送到 Harbor", "delivered to Harbor"]
       },
-      "blockedReply": "暂不能读取 Harbor Paws Salon 的进度：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。下一步请等待 Driver delivery-to-shop update for Harbor Paws Salon。",
+      "blockedReply": "暂不能读取 Harbor Paws Salon 的进度：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。不要给 Driver 重新发送首段接送短信；下一步直接调用 system_wait_for_sms，from=Driver，context=等待 Driver 确认 Kylin 已送到 Harbor Paws Salon。",
       "eventType": "selected_shop_delayed_pickup",
       "reply": "今天前面的客人处理慢了一点，Kylin 预计四点半可以接。"
     },
@@ -251,7 +251,7 @@
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
         "keywords": ["已送到 Harbor", "Kylin 已送到 Harbor", "delivered to Harbor"]
       },
-      "blockedReply": "暂不能读取 Harbor Paws Salon 的完成更新：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。下一步请等待 Driver delivery-to-shop update for Harbor Paws Salon。",
+      "blockedReply": "暂不能读取 Harbor Paws Salon 的完成更新：需要先收到 Driver 已送到 Harbor Paws Salon 的确认。不要给 Driver 重新发送首段接送短信；下一步直接调用 system_wait_for_sms，from=Driver，context=等待 Driver 确认 Kylin 已送到 Harbor Paws Salon。",
       "eventType": "selected_shop_grooming_finished",
       "reply": "Kylin 洗完了，可以接了。"
     },
@@ -325,7 +325,7 @@
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
         "keywords": ["已送到 PetSmart", "Kylin 已送到 PetSmart", "delivered to PetSmart"]
       },
-      "blockedReply": "暂不能读取 PetSmart 的到店更新：需要先收到 Driver 已送到 PetSmart 的确认。下一步请等待 Driver delivery-to-shop update for PetSmart。",
+      "blockedReply": "暂不能读取 PetSmart 的到店更新：需要先收到 Driver 已送到 PetSmart 的确认。不要给 Driver 重新发送首段接送短信；下一步直接调用 system_wait_for_sms，from=Driver，context=等待 Driver 确认 Kylin 已送到 PetSmart。",
       "eventType": "petsmart_arrival_confirmed",
       "reply": "Kylin 已经到店。"
     },
@@ -336,7 +336,7 @@
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
         "keywords": ["已送到 PetSmart", "Kylin 已送到 PetSmart", "delivered to PetSmart"]
       },
-      "blockedReply": "暂不能读取 PetSmart 的进度：需要先收到 Driver 已送到 PetSmart 的确认。下一步请等待 Driver delivery-to-shop update for PetSmart。",
+      "blockedReply": "暂不能读取 PetSmart 的进度：需要先收到 Driver 已送到 PetSmart 的确认。不要给 Driver 重新发送首段接送短信；下一步直接调用 system_wait_for_sms，from=Driver，context=等待 Driver 确认 Kylin 已送到 PetSmart。",
       "eventType": "petsmart_delayed_pickup",
       "reply": "前面的客人还没洗完，Kylin 要晚一点开始，七点二十（19:20）来接吧。"
     },
@@ -347,7 +347,7 @@
         "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
         "keywords": ["已送到 PetSmart", "Kylin 已送到 PetSmart", "delivered to PetSmart"]
       },
-      "blockedReply": "暂不能读取 PetSmart 的完成更新：需要先收到 Driver 已送到 PetSmart 的确认。下一步请等待 Driver delivery-to-shop update for PetSmart。",
+      "blockedReply": "暂不能读取 PetSmart 的完成更新：需要先收到 Driver 已送到 PetSmart 的确认。不要给 Driver 重新发送首段接送短信；下一步直接调用 system_wait_for_sms，from=Driver，context=等待 Driver 确认 Kylin 已送到 PetSmart。",
       "eventType": "petsmart_grooming_finished",
       "reply": "Kylin 洗完了，可以接了。"
     },
@@ -374,15 +374,15 @@
     },
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-      "keywords": ["Harbor Paws", "harbor-paws-salon", "送到 Harbor", "送达 Harbor", "到 Harbor"],
-      "excludeKeywords": ["到家接", "来接 Kylin", "接 Kylin", "接kylin", "home pickup"],
+      "keywords": ["delivery-to-shop", "已送到 Harbor", "送到 Harbor Paws Salon", "送达 Harbor Paws Salon", "Kylin 已送到 Harbor", "到店"],
+      "excludeKeywords": ["到家接", "来接 Kylin", "接 Kylin", "接kylin", "home pickup", "13:30", "14:00"],
       "priority": 170,
       "eventType": "driver_delivered_to_petsmart",
       "reply": "Kylin 已送到 Harbor Paws Salon。"
     },
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-      "keywords": ["Harbor Paws", "harbor-paws-salon", "16:30", "4:30", "四点半", "pickup from harbor", "pick up kylin at harbor"],
+      "keywords": ["去 Harbor Paws Salon 接", "到 Harbor Paws Salon 接", "Harbor Paws Salon 接 Kylin", "接回 Kylin", "16:30", "4:30", "四点半", "pickup from harbor", "pick up kylin at harbor"],
       "excludeKeywords": ["13:30", "14:00", "到家接", "来接 Kylin", "home pickup"],
       "priority": 180,
       "eventType": "driver_return_pickup_confirmed",
@@ -396,8 +396,8 @@
     },
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
-      "keywords": ["PetSmart", "Pet Smart", "delivery-to-petsmart", "送到 PetSmart", "送达 PetSmart", "到 PetSmart"],
-      "excludeKeywords": ["8:30", "请到家", "上门接", "接麒麟", "接 Kylin", "接kylin", "到家接"],
+      "keywords": ["delivery-to-shop", "delivery-to-petsmart", "已送到 PetSmart", "送到 PetSmart", "送达 PetSmart", "Kylin 已送到 PetSmart", "到店"],
+      "excludeKeywords": ["8:30", "16:30", "17:00", "请到家", "上门接", "接麒麟", "接 Kylin", "接kylin", "到家接"],
       "eventType": "driver_delivered_to_petsmart",
       "reply": "Kylin 已送到 PetSmart。"
     },

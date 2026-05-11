@@ -103,7 +103,8 @@ Use memory to decide where the current event is:
 - After the selected grooming shop confirms the selected booking, contact Driver directly. Do not ask Y whether to contact Driver, because Y's earlier selection already authorized routine downstream coordination.
 - Driver is Y's private driver, not a shop pickup service. The first Driver coordination message should ask Driver to pick Kylin up from Y's home and deliver her to the selected grooming shop before the appointment. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in this first Driver SMS. After Driver confirms the first pickup plan, the next listener must be `system_wait_for_sms` from Driver for Driver's delivery-to-shop update. Do not wait on the selected shop for arrival or progress until Driver has reported Kylin was delivered to that shop. Ask Driver to pick Kylin up from the selected shop only after that shop says grooming is finished, Kylin is ready for pickup, or gives a revised pickup time after a delay.
 - Driver SMS is addressed to Driver, not Y. Start Driver SMS with `司机您好` or `您好`; never write `Y您好`, `Y你好`, or similar Y-facing greetings in a Driver SMS.
-- After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After that, call a second `system_wait_for_sms` from Driver with context `Driver delivery-to-shop update for <selected shop name>` and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-shop.
+- After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After that, call a second `system_wait_for_sms` from Driver with context `Driver delivery-to-shop update for <selected shop name>` and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 已送到, or 送达 satisfies delivery-to-shop.
+- If a selected-shop listener returns that shop progress cannot be read until Driver delivery is confirmed, do not send another first-leg Driver SMS. Immediately call `system_wait_for_sms` from Driver with context `Driver delivery-to-shop update for <selected shop name>`, then resume the selected-shop listener only after Driver confirms delivery.
 - Keep regular user-facing messages short and natural.
 - The blueprint is for operational history, not internal reasoning.
 
@@ -138,7 +139,7 @@ Do not ask Y whether to create routine reminders. Create the normal departure an
 For final home confirmation, do not call `system_wait_for_sms` with only an abstract context such as "Driver home confirmation". First send Driver a short SMS asking him to confirm once Kylin is home, then wait on that SMS listener. Do not pay or record the expense until an inbound Driver SMS explicitly confirms Kylin is home.
 
 Selected-shop progress, delay, finish, pickup-time, and pickup-ready signals must come from the selected grooming shop. Do not ask Driver to report shop service status. Driver reports only pickup, delivery, return, and home arrival. If the selected shop reports a delay and gives a new pickup time, update Driver for that pickup time and continue monitoring; this does not require another Y decision unless it creates a meaningful conflict.
-After Driver confirms the first pickup plan, do not send another SMS asking Driver to report future milestones. Start listening for Driver's delivery-to-shop update from Driver, then listen to the selected shop for progress or pickup-time changes.
+After Driver confirms the first pickup plan, do not send another SMS asking Driver to report future milestones and do not resend the first pickup instruction. Start listening for Driver's delivery-to-shop update from Driver, then listen to the selected shop for progress or pickup-time changes.
 
 ## Tool Protocol
 
@@ -279,7 +280,7 @@ For a 9:00 PetSmart appointment, the normal private-driver sequence is:
 
 - Ask Driver to pick Kylin up from Y's home before 9:00 and deliver Kylin to PetSmart.
 - Wait for Driver's pickup confirmation from Driver.
-- Then wait separately for Driver's delivery-to-shop update from Driver. Do not treat pickup confirmation as delivery.
+- Then wait separately for Driver's delivery-to-shop update from Driver. Do not treat pickup confirmation as delivery, and do not resend the first pickup SMS if the delivery update is missing.
 - After Driver reports Kylin was delivered to the selected shop, wait for the selected shop's arrival/progress/finish updates directly from that shop.
 - Only after the selected shop says grooming is finished, Kylin is ready, or gives a revised pickup time after a delay, ask Driver to pick Kylin up from the selected shop and bring her home.
 - Before final closure, send Driver a short SMS asking for home confirmation, wait on that listener, and only after Driver says Kylin is home, pay and record the expense.

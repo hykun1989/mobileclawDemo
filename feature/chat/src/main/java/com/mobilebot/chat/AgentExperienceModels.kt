@@ -1,6 +1,29 @@
 package com.mobilebot.chat
 
 import com.mobilebot.domain.todo.TodoStatus
+import java.time.LocalDateTime
+
+enum class ScenarioClockMode {
+    Live,
+    FastUntilNextEvent,
+}
+
+data class ScenarioTimelineEvent(
+    val id: String,
+    val triggerAt: LocalDateTime,
+    val type: String,
+    val source: String,
+    val title: String,
+    val body: String,
+)
+
+data class AgentSystemEvent(
+    val id: String,
+    val timeText: String,
+    val source: String,
+    val title: String,
+    val body: String,
+)
 
 enum class AgentTimelineStatus {
     PENDING,
@@ -79,9 +102,11 @@ data class AgentExperienceFrame(
     val scenario: AgentScenarioConfig,
     val statusLabel: String,
     val clockTimeText: String = "13:00",
-    val clockDateText: String = "04/25/2027 Sat",
+    val clockDateText: String = "04/25/2027 Sun",
+    val clockMode: ScenarioClockMode = ScenarioClockMode.Live,
     val busy: Boolean = false,
     val hasStarted: Boolean = false,
+    val recentSystemEvents: List<AgentSystemEvent> = emptyList(),
     val conversationItems: List<AgentConversationItem> = emptyList(),
     val taskLogs: List<AgentTaskLog> = emptyList(),
     val participants: List<AgentParticipant> = emptyList(),

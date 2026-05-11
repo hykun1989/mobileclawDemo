@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.format.TextStyle
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
@@ -46,7 +47,36 @@ class AgentExperienceViewModel
         private var lastGroomingPaymentAmount: String? = null
         private var awaitingInitialPrecheckDecision = false
         private var activeGroomingDate = INITIAL_SCENARIO_CLOCK.toLocalDate().plusDays(1)
+        private var clockMode = ScenarioClockMode.Live
+        private var normalClockElapsedMs = 0L
+        private val deliveredTimelineEvents = mutableSetOf<String>()
         private val groomingMilestones = mutableSetOf<GroomingMilestone>()
+        private val timelineScript = listOf(
+            ScenarioTimelineEvent(
+                id = "petsmart-open-slot",
+                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(5),
+                type = "incoming_sms",
+                source = "PetSmart",
+                title = "PetSmart 来信",
+                body = "原本 14:00 的客人计划有变，现在可以安排 Kylin 洗澡和去浮毛。",
+            ),
+            ScenarioTimelineEvent(
+                id = "ella-call",
+                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(9),
+                type = "incoming_call",
+                source = "Ella",
+                title = "Ella 来电",
+                body = "通话中会提到一个需要跟进的家庭待办。",
+            ),
+            ScenarioTimelineEvent(
+                id = "kylin-downstairs-reminder",
+                triggerAt = INITIAL_SCENARIO_CLOCK.withHour(13).withMinute(20),
+                type = "reminder_fired",
+                source = "System",
+                title = "送 Kylin 下楼",
+                body = "司机老陈即将到楼下。",
+            ),
+        )
 
         private val scenario = AgentScenarioConfig(
             scenarioId = "pet-grooming",
@@ -90,17 +120,18 @@ class AgentExperienceViewModel
                 }
             }
             viewModelScope.launch {
-                delay(AUTO_TRIGGER_DELAY_MS)
-                if (!_frame.value.hasStarted && !_frame.value.busy) {
-                    startScenario()
-                }
-            }
-            viewModelScope.launch {
                 while (true) {
-                    delay(SCENARIO_CLOCK_TICK_MS)
+                    delay(CLOCK_LOOP_INTERVAL_MS)
                     tickScenarioClock()
                 }
             }
+        }
+
+        fun accelerateClockUntilNextEvent() {
+            if (deferredRetriggerInProgress) return
+            clockMode = ScenarioClockMode.FastUntilNextEvent
+            normalClockElapsedMs = 0L
+            _frame.update { it.copy(clockMode = clockMode) }
         }
 
         fun startScenario() {
@@ -548,7 +579,8 @@ class AgentExperienceViewModel
         private fun AgentExperienceFrame.withClock(clock: LocalDateTime): AgentExperienceFrame =
             copy(
                 clockTimeText = clock.toLocalTime().format(CLOCK_TIME_FORMATTER),
-                clockDateText = "${clock.toLocalDate().format(CLOCK_DATE_FORMATTER)} ${scenarioDayName(clock, full = false)}",
+                clockDateText = "${clock.toLocalDate().format(CLOCK_DATE_FORMATTER)} ${clock.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US)}",
+                clockMode = clockMode,
             )
 
         private fun scenarioDayName(
@@ -1482,9 +1514,55 @@ class AgentExperienceViewModel
 
         private fun tickScenarioClock() {
             if (deferredRetriggerInProgress) return
-            scenarioClock = scenarioClock.plusMinutes(1)
-            _frame.update { it.withClock(scenarioClock) }
+            if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
+                scenarioClock = scenarioClock.plusMinutes(1)
+                _frame.update { it.withClock(scenarioClock) }
+                handleDueTimelineEvents()
+                return
+            }
+            normalClockElapsedMs += CLOCK_LOOP_INTERVAL_MS
+            if (normalClockElapsedMs >= SCENARIO_CLOCK_TICK_MS) {
+                normalClockElapsedMs = 0L
+                scenarioClock = scenarioClock.plusMinutes(1)
+                _frame.update { it.withClock(scenarioClock) }
+                handleDueTimelineEvents()
+            }
         }
+
+        private fun handleDueTimelineEvents() {
+            val due = timelineScript
+                .filter { it.id !in deliveredTimelineEvents && !it.triggerAt.isAfter(scenarioClock) }
+                .sortedBy { it.triggerAt }
+            if (due.isEmpty()) return
+            for (event in due) {
+                deliveredTimelineEvents += event.id
+                _frame.update {
+                    it.copy(
+                        recentSystemEvents = appendSystemEvent(it.recentSystemEvents, event),
+                        debugTrace = appendTrace(it.debugTrace, "system event -> ${event.id}"),
+                    )
+                }
+            }
+            if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
+                clockMode = ScenarioClockMode.Live
+                normalClockElapsedMs = 0L
+                _frame.update { it.copy(clockMode = clockMode) }
+            }
+        }
+
+        private fun appendSystemEvent(
+            existing: List<AgentSystemEvent>,
+            event: ScenarioTimelineEvent,
+        ): List<AgentSystemEvent> =
+            (
+                existing + AgentSystemEvent(
+                    id = event.id,
+                    timeText = blueprintTimeText(event.triggerAt),
+                    source = event.source,
+                    title = event.title,
+                    body = event.body,
+                )
+            ).takeLast(MAX_SYSTEM_EVENTS)
 
         private fun selectedAppointmentIsAfternoon(): Boolean =
             latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingBookAfternoonBathOnly
@@ -1839,6 +1917,7 @@ class AgentExperienceViewModel
             private const val TAG = "AgentExperienceViewModel"
             private const val MAX_TRACE_LINES = 80
             private const val MAX_SIGNALS = 12
+            private const val MAX_SYSTEM_EVENTS = 10
             private const val MAX_PARTICIPANTS = 5
             private const val MAX_CONVERSATION_ITEMS = 40
             private const val MAX_TASK_LOGS = 80
@@ -1846,6 +1925,7 @@ class AgentExperienceViewModel
             private const val MAX_AUTO_CONTINUATIONS = 14
             private const val AUTO_TRIGGER_DELAY_MS = 5_000L
             private const val SCENARIO_CLOCK_TICK_MS = 60_000L
+            private const val CLOCK_LOOP_INTERVAL_MS = 1_000L
             private const val CLOCK_ADVANCE_STEPS = 30
             private const val CLOCK_ADVANCE_STEP_MS = 1_000L
             private const val TOOL_ROUND_LIMIT_PREFIX = "Stopped: too many tool call rounds"

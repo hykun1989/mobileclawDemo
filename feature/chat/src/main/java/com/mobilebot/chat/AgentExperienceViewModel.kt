@@ -897,6 +897,10 @@ class AgentExperienceViewModel
                 text.contains("现在向 PetSmart 发送短信") ||
                 text.contains("是否现在就联系司机") ||
                 text.contains("接下来将联系您的私人司机") ||
+                text.contains("已向司机发送指令") ||
+                text.contains("等待司机回复确认") ||
+                text.contains("正在监听司机") ||
+                text.contains("pickup 计划") ||
                 text.contains("已启动监听") ||
                 text.contains("仍在监听") ||
                 text.contains("当前状态为") ||

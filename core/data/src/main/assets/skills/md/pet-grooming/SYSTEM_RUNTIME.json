@@ -352,6 +352,14 @@
     },
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
+      "keywords": ["Harbor Paws", "harbor-paws-salon", "16:30", "4:30", "四点半", "pickup from harbor", "pick up kylin at harbor", "去接", "接回来", "接回", "接 Kylin 回家"],
+      "excludeKeywords": ["13:30", "14:00", "到家接", "来接 Kylin", "home pickup"],
+      "priority": 180,
+      "eventType": "driver_return_pickup_confirmed",
+      "reply": "收到，我{pickup_time}去 Harbor Paws Salon 接 Kylin。"
+    },
+    {
+      "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
       "keywords": ["19:20", "7:20", "七点二十", "7点20", "pickup from petsmart", "pick up kylin at petsmart", "去接", "接回来"],
       "eventType": "driver_return_pickup_confirmed",
       "reply": "收到，我{pickup_time}去 PetSmart 接 Kylin。"
@@ -366,6 +374,7 @@
     {
       "contactAliases": ["Driver", "Y's driver", "private driver", "trusted driver", "司机"],
       "keywords": ["pickup", "pick up", "come get", "接", "楼下"],
+      "excludeKeywords": ["接回", "接回来", "回家", "送回", "去 PetSmart 接", "去PetSmart接", "去 Harbor", "Harbor Paws 接", "Harbor Paws Salon 接"],
       "eventType": "driver_home_pickup_confirmed",
       "reply": "收到，我{pickup_time}来接 Kylin，会按预约时间前送到 PetSmart。"
     },

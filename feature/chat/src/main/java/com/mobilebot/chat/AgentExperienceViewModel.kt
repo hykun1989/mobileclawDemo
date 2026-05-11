@@ -68,10 +68,10 @@ class AgentExperienceViewModel
                 The first PetSmart SMS after Y keeps this week must ask for the regular Sunday 14:00 bath plus de-shedding slot. Do not ask for 9:00, 17:00, or broad morning/afternoon alternatives in that first PetSmart SMS; those alternatives should come from PetSmart's reply.
                 A PetSmart message that a time is available is not the final booking confirmation. After Y chooses the 9:00 option, the next operational step is only: send PetSmart a confirmation SMS for that slot, then call system_wait_for_sms for PetSmart's booking confirmation. Do not call system_send_sms for Driver until PetSmart's inbound booking-confirmed SMS exists in history.
                 If Y chooses another shop and Harbor Paws Salon is selected for the original 14:00 bath plus de-shedding slot, do not reuse PetSmart's 8:30/9:00 timing. Confirm the 14:00 Harbor Paws Salon booking by SMS first, then coordinate Driver for 13:30 home pickup and arrival at Harbor Paws Salon by 14:00.
-                Do not resolve or message Driver until PetSmart has confirmed the final selected booking slot by inbound SMS. Driver is Y's private driver: for a 9:00 PetSmart appointment, coordinate Driver to pick Kylin up from Y's home at 8:30 and deliver him to PetSmart by 9:00; for an accepted afternoon bath-only slot after 17:00, coordinate Driver to pick Kylin up at exactly 16:30 and deliver him to PetSmart by 17:00. The afternoon first Driver SMS must explicitly say `16:30 到家接 Kylin，17:00 前送到 PetSmart`; do not write `下午5点前到家接`. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in this first Driver SMS. After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports; the next listener must be system_wait_for_sms from Driver for Driver's delivery-to-PetSmart update. Do not wait on PetSmart for arrival or progress until Driver has reported Kylin was delivered to PetSmart. Ask Driver to pick up from PetSmart only after PetSmart says Kylin is finished, ready, or gives a revised pickup time after a delay.
-                After PetSmart confirms the booking, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar Y-facing greetings.
-                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected next-day departure time with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-PetSmart update" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-PetSmart.
-                After Y answers a declared decision point, continue through routine downstream actions without asking again: booking confirmation, driver home pickup coordination, reminders, Driver delivery-to-PetSmart monitoring, PetSmart progress/finish monitoring, Driver return coordination, home confirmation, payment, accounting, and final summary. Pause only at declared decision points or real blockers, and finish only after Kylin is confirmed home, payment is complete, and the expense is recorded. Do not ask Y whether to create routine reminders. For home confirmation, send Driver a short SMS asking him to confirm once Kylin is home, then wait on that returned SMS listener. Do not pay before an inbound Driver SMS explicitly confirms home arrival. PetSmart progress and finish updates must be listened from PetSmart, not delegated to Driver.
+                Do not resolve or message Driver until the selected grooming shop has confirmed the final booking slot by inbound SMS. Driver is Y's private driver: for a 9:00 PetSmart appointment, coordinate Driver to pick Kylin up from Y's home at 8:30 and deliver him to PetSmart by 9:00; for an accepted afternoon bath-only slot after 17:00, coordinate Driver to pick Kylin up at exactly 16:30 and deliver him to PetSmart by 17:00; for a 14:00 Harbor Paws Salon appointment, coordinate Driver to pick Kylin up at 13:30 and deliver him to Harbor Paws Salon by 14:00. The afternoon first Driver SMS must explicitly say `16:30 到家接 Kylin，17:00 前送到 PetSmart`; do not write `下午5点前到家接`. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in this first Driver SMS. After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports; the next listener must be system_wait_for_sms from Driver for Driver's delivery-to-shop update. Do not wait on the selected shop for arrival or progress until Driver has reported Kylin was delivered to that shop. Ask Driver to pick up from the selected shop only after that shop says Kylin is finished, ready, or gives a revised pickup time after a delay.
+                After the selected grooming shop confirms the booking, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar Y-facing greetings.
+                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected next-day departure time with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-shop update" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-shop.
+                After Y answers a declared decision point, continue through routine downstream actions without asking again: booking confirmation, driver home pickup coordination, reminders, Driver delivery-to-shop monitoring, selected-shop progress/finish monitoring, Driver return coordination, home confirmation, payment, accounting, and final summary. Pause only at declared decision points or real blockers, and finish only after Kylin is confirmed home, payment is complete, and the expense is recorded. Do not ask Y whether to create routine reminders. For home confirmation, send Driver a short SMS asking him to confirm once Kylin is home, then wait on that returned SMS listener. Do not pay before an inbound Driver SMS explicitly confirms home arrival. Selected-shop progress and finish updates must be listened from the selected shop, not delegated to Driver.
                 If Y selects a concrete grooming time or service option, treat that as confirmation to proceed with that option. Do not ask for a second confirmation of the same choice.
                 Do not end with a promise to monitor later while the workflow is still open. If the next step is monitoring, immediately call system_wait_for_sms for the next expected PetSmart or Driver signal.
             """.trimIndent(),
@@ -453,10 +453,10 @@ class AgentExperienceViewModel
                 The first PetSmart SMS after Y keeps this week must ask for the regular Sunday 14:00 bath plus de-shedding slot. Do not ask for 9:00, 17:00, or broad morning/afternoon alternatives in that first PetSmart SMS; those alternatives should come from PetSmart's reply.
                 A PetSmart message that a time is available is not the final booking confirmation. After Y chooses the 9:00 option, the next operational step is only: send PetSmart a confirmation SMS for that slot, then call system_wait_for_sms for PetSmart's booking confirmation. Do not call system_send_sms for Driver until PetSmart's inbound booking-confirmed SMS exists in history.
                 If Y chooses another shop and Harbor Paws Salon is selected for the original 14:00 bath plus de-shedding slot, do not reuse PetSmart's 8:30/9:00 timing. Confirm the 14:00 Harbor Paws Salon booking by SMS first, then coordinate Driver for 13:30 home pickup and arrival at Harbor Paws Salon by 14:00.
-                Do not resolve or message Driver until PetSmart has confirmed the final selected booking slot by inbound SMS. Driver is Y's private driver: for a 9:00 PetSmart appointment, coordinate Driver to pick Kylin up from Y's home at 8:30 and deliver him to PetSmart by 9:00; for an accepted afternoon bath-only slot after 17:00, coordinate Driver to pick Kylin up at exactly 16:30 and deliver him to PetSmart by 17:00. The afternoon first Driver SMS must explicitly say `16:30 到家接 Kylin，17:00 前送到 PetSmart`; do not write `下午5点前到家接`. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in this first Driver SMS. After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports; the next listener must be system_wait_for_sms from Driver for Driver's delivery-to-PetSmart update. Do not wait on PetSmart for arrival or progress until Driver has reported Kylin was delivered to PetSmart. Ask Driver to pick up from PetSmart only after PetSmart says Kylin is finished, ready, or gives a revised pickup time after a delay.
-                After PetSmart confirms the booking, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar Y-facing greetings.
-                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected grooming-day departure time ($morningReminder for a 9:00 appointment, or $afternoonReminder for an afternoon 17:00 appointment) with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-PetSmart update" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-PetSmart.
-                After Y answers a declared decision point, continue through routine downstream actions without asking again: booking confirmation, driver home pickup coordination, reminders, Driver delivery-to-PetSmart monitoring, PetSmart progress/finish monitoring, Driver return coordination, home confirmation, payment, accounting, and final summary. Pause only at declared decision points or real blockers, and finish only after Kylin is confirmed home, payment is complete, and the expense is recorded. Do not ask Y whether to create routine reminders. For home confirmation, send Driver a short SMS asking him to confirm once Kylin is home, then wait on that returned SMS listener. Do not pay before an inbound Driver SMS explicitly confirms home arrival. PetSmart progress and finish updates must be listened from PetSmart, not delegated to Driver.
+                Do not resolve or message Driver until the selected grooming shop has confirmed the final booking slot by inbound SMS. Driver is Y's private driver: for a 9:00 PetSmart appointment, coordinate Driver to pick Kylin up from Y's home at 8:30 and deliver him to PetSmart by 9:00; for an accepted afternoon bath-only slot after 17:00, coordinate Driver to pick Kylin up at exactly 16:30 and deliver him to PetSmart by 17:00; for a 14:00 Harbor Paws Salon appointment, coordinate Driver to pick Kylin up at 13:30 and deliver him to Harbor Paws Salon by 14:00. The afternoon first Driver SMS must explicitly say `16:30 到家接 Kylin，17:00 前送到 PetSmart`; do not write `下午5点前到家接`. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in this first Driver SMS. After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports; the next listener must be system_wait_for_sms from Driver for Driver's delivery-to-shop update. Do not wait on the selected shop for arrival or progress until Driver has reported Kylin was delivered to that shop. Ask Driver to pick up from the selected shop only after that shop says Kylin is finished, ready, or gives a revised pickup time after a delay.
+                After the selected grooming shop confirms the booking, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar Y-facing greetings.
+                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected grooming-day departure time ($morningReminder for a 9:00 appointment, or $afternoonReminder for an afternoon 17:00 appointment) with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-shop update" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-shop.
+                After Y answers a declared decision point, continue through routine downstream actions without asking again: booking confirmation, driver home pickup coordination, reminders, Driver delivery-to-shop monitoring, selected-shop progress/finish monitoring, Driver return coordination, home confirmation, payment, accounting, and final summary. Pause only at declared decision points or real blockers, and finish only after Kylin is confirmed home, payment is complete, and the expense is recorded. Do not ask Y whether to create routine reminders. For home confirmation, send Driver a short SMS asking him to confirm once Kylin is home, then wait on that returned SMS listener. Do not pay before an inbound Driver SMS explicitly confirms home arrival. Selected-shop progress and finish updates must be listened from the selected shop, not delegated to Driver.
                 If Y selects a concrete grooming time or service option, treat that as confirmation to proceed with that option. Do not ask for a second confirmation of the same choice.
                 Do not end with a promise to monitor later while the workflow is still open. If the next step is monitoring, immediately call system_wait_for_sms for the next expected PetSmart or Driver signal.
                 Do not send user-facing prose about loading memory, creating a plan, tool usage, or decision point ids. The first user-facing message should be only the weekly grooming precheck question with short action candidates.
@@ -941,7 +941,7 @@ class AgentExperienceViewModel
                         text.contains("全流程完成") ||
                         (text.contains("支付") && (text.contains("记账") || text.contains("账务")))
                 ) &&
-                (text.contains("到家") || text.contains("home")) &&
+                (text.contains("到家") || text.contains("已接回") || text.contains("接回") || text.contains("home")) &&
                 (text.contains("kylin") || text.contains("麒麟"))
 
         private fun isRoutineReminderQuestion(text: String): Boolean {
@@ -1512,9 +1512,9 @@ class AgentExperienceViewModel
                     }
                 }
                 message.startsWith("Payment completed", ignoreCase = true) ->
-                    LocalDateTime.of(2027, 4, 26, 20, 0)
+                    selectedPaymentClock()
                 message.startsWith("Expense recorded", ignoreCase = true) ->
-                    LocalDateTime.of(2027, 4, 26, 20, 1)
+                    selectedAccountingClock()
                 message.startsWith("Long reminder created", ignoreCase = true) ||
                     message.startsWith("Reminder created", ignoreCase = true) ->
                     null
@@ -1553,6 +1553,15 @@ class AgentExperienceViewModel
                 isGroomingShopContact(contact) && (body.contains("下午") || body.contains("5点")) ->
                     LocalDateTime.of(2027, 4, 25, 13, 4)
                 contact.contains("Driver", ignoreCase = true) &&
+                    (
+                        body.contains("接回") ||
+                            body.contains("接回来") ||
+                            (body.contains("接") && body.contains("回家")) ||
+                            body.contains("接 Kylin 回家") ||
+                            (body.contains("Harbor Paws", ignoreCase = true) && body.contains("接") && !body.contains("到家接"))
+                    ) ->
+                    selectedDriverReturnPickupClock()
+                contact.contains("Driver", ignoreCase = true) &&
                     (body.contains("13:30") || body.contains("14:00") || body.contains("Harbor Paws")) ->
                     LocalDateTime.of(2027, 4, 25, 13, 9)
                 contact.contains("Driver", ignoreCase = true) && body.contains("8:30") ->
@@ -1563,7 +1572,7 @@ class AgentExperienceViewModel
                 contact.contains("Driver", ignoreCase = true) && (body.contains("19:20") || body.contains("七点二十")) ->
                     LocalDateTime.of(2027, 4, 26, 19, 20)
                 contact.contains("Driver", ignoreCase = true) && (body.contains("到家") || body.contains("home", ignoreCase = true)) ->
-                    LocalDateTime.of(2027, 4, 26, 20, 0)
+                    selectedDriverHomeArrivalClock()
                 else -> null
             }
 
@@ -1608,11 +1617,11 @@ class AgentExperienceViewModel
                 eventType == "driver_delivered_to_petsmart" ->
                     selectedAppointmentArrivalClock()
                 eventType == "driver_return_pickup_confirmed" ->
-                    LocalDateTime.of(2027, 4, 26, 19, 20)
+                    selectedDriverReturnPickupClock()
                 eventType == "driver_return_eta" ->
-                    LocalDateTime.of(2027, 4, 26, 19, 35)
+                    selectedDriverReturnEtaClock()
                 eventType == "driver_home_arrival" ->
-                    LocalDateTime.of(2027, 4, 26, 20, 0)
+                    selectedDriverHomeArrivalClock()
                 isGroomingShopContact(contact) &&
                     (body.contains("上午九点") || body.contains("上午9点") || body.contains("9点")) ->
                     LocalDateTime.of(2027, 4, 25, 13, 3)
@@ -1632,8 +1641,11 @@ class AgentExperienceViewModel
                     (body.contains("19:20") || body.contains("去 PetSmart 接") || body.contains("去PetSmart接")) ->
                     LocalDateTime.of(2027, 4, 26, 19, 20)
                 contact.contains("Driver", ignoreCase = true) &&
+                    (body.contains("Harbor Paws", ignoreCase = true) && (body.contains("去") || body.contains("接"))) ->
+                    selectedDriverReturnPickupClock()
+                contact.contains("Driver", ignoreCase = true) &&
                     (body.contains("已经到家") || body.contains("到家了") || body.contains("已到家")) ->
-                    LocalDateTime.of(2027, 4, 26, 20, 0)
+                    selectedDriverHomeArrivalClock()
                 else -> null
             }
 
@@ -1692,6 +1704,29 @@ class AgentExperienceViewModel
                 selectedAppointmentIsAfternoon() -> LocalDateTime.of(2027, 4, 26, 18, 30)
                 else -> LocalDateTime.of(2027, 4, 26, 16, 30)
             }
+
+        private fun selectedDriverReturnPickupClock(): LocalDateTime =
+            when {
+                selectedAppointmentIsAlternative() -> LocalDateTime.of(2027, 4, 26, 16, 31)
+                else -> LocalDateTime.of(2027, 4, 26, 19, 20)
+            }
+
+        private fun selectedDriverReturnEtaClock(): LocalDateTime =
+            when {
+                selectedAppointmentIsAlternative() -> LocalDateTime.of(2027, 4, 26, 16, 50)
+                else -> LocalDateTime.of(2027, 4, 26, 19, 35)
+            }
+
+        private fun selectedDriverHomeArrivalClock(): LocalDateTime =
+            when {
+                selectedAppointmentIsAlternative() -> LocalDateTime.of(2027, 4, 26, 17, 10)
+                else -> LocalDateTime.of(2027, 4, 26, 20, 0)
+            }
+
+        private fun selectedPaymentClock(): LocalDateTime = selectedDriverHomeArrivalClock()
+
+        private fun selectedAccountingClock(): LocalDateTime =
+            selectedPaymentClock().plusMinutes(1)
 
         private fun selectedAppointmentIsAfternoon(): Boolean =
             latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingBookAfternoonBathOnly

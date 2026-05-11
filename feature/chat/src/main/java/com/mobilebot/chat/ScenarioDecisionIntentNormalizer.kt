@@ -241,7 +241,13 @@ sealed class ScenarioDecisionIntent(
         id = "pet_grooming.find_alternative_shop",
         displayLabel = "换一家",
         meaning = "Y wants to look for another grooming shop.",
-    )
+    ) {
+        override fun agentText(rawText: String): String =
+            """
+            $command
+            NEXT_OPERATION: The next assistant step must be a tool call, not user-facing prose. Use device_system service_call with serviceId `pet_salon_search` to list nearby grooming shops, then choose a non-PetSmart shop that supports both extra-large dog bathing and de-shedding. Prefer Harbor Paws Salon if it is present because it supports both required services. Call get_pet_shop_detail for the chosen shop, then send SMS to that shop with this Chinese message: `请问明天下午2点可以给 Kylin 安排基础洗澡和去浮毛服务吗？她是30公斤以上的伯恩山犬。` Then call system_wait_for_sms for that shop's reply. Use the chosen shop name consistently in later Driver, payment, accounting, and summary steps.
+            """.trimIndent()
+    }
 
     data object ModifyPlan : ScenarioDecisionIntent(
         id = "general.modify_plan",

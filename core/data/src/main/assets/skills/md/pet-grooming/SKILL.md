@@ -193,7 +193,7 @@ The app may normalize Y's reply into a fixed `USER_INTENT:<id>` command before i
 - `USER_INTENT:pet_grooming.book_0900`: Y chooses the 9:00 PetSmart slot. Confirm that slot with PetSmart, wait for PetSmart's booking confirmation SMS, then coordinate Driver.
 - `USER_INTENT:pet_grooming.ask_afternoon`: Send PetSmart an SMS asking whether tomorrow after 17:00 can be booked as a bath-only slot for Kylin, then wait for PetSmart's SMS before presenting updated options. Do not repeat the previous decision prompt before receiving the new SMS.
 - `USER_INTENT:pet_grooming.book_afternoon_bath_only`: Y accepts the afternoon bath-only PetSmart slot. This is a final selection, not another availability question. Do not show the same tradeoff prompt again. Send PetSmart a confirmation SMS that clearly confirms the afternoon bath-only booking after 17:00, wait for PetSmart's booking confirmation SMS, then coordinate Driver around the afternoon appointment.
-- `USER_INTENT:pet_grooming.find_alternative_shop`: Look for another grooming shop because PetSmart's options are not acceptable.
+- `USER_INTENT:pet_grooming.find_alternative_shop`: Look for another grooming shop because PetSmart's options are not acceptable. Use the pet salon search service to choose a non-PetSmart shop that supports both extra-large dog bathing and de-shedding. Prefer Harbor Paws Salon if it is available in the service result. After selecting the shop, use that shop name consistently for SMS, Driver destination, payment, accounting, and summary.
 - `USER_INTENT:general.modify_plan`, `USER_INTENT:general.rewrite_plan`, `USER_INTENT:general.cancel`: apply the corresponding plan change or cancellation.
 - `USER_INTENT:general.freeform` followed by `USER_TEXT:`: use the user text as the instruction, and ask only if it is materially ambiguous.
 
@@ -259,7 +259,7 @@ If PetSmart cannot satisfy both time and scope, negotiate reasonable alternative
 
 When the tradeoff affects Y's preference, pause immediately and ask Y. This is the `confirm_service_scope_or_time_tradeoff` decision point. Do not choose a morning time, reduced service scope, or different shop by yourself. Do not contact Driver or confirm the booking until Y chooses an option.
 
-Only after Y rejects PetSmart's available options or explicitly asks for alternatives, use `list_pet_shops` or `compare_pet_shop_prices` to evaluate another shop.
+Only after Y rejects PetSmart's available options or explicitly asks for alternatives, use `list_pet_shops` or `compare_pet_shop_prices` to evaluate another shop. The alternative shop must support Kylin's selected scope: extra-large dog basic bath plus de-shedding. Do not choose a shop that only supports basic bath unless Y explicitly accepts reducing the service scope.
 
 When Y chooses one of the available times or service scopes, proceed directly with booking and downstream coordination. Do not ask whether to confirm the selected slot again.
 

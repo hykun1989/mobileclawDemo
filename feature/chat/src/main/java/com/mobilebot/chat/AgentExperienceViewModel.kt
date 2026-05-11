@@ -474,21 +474,22 @@ class AgentExperienceViewModel
             val paymentDate = activeGroomingDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
             val morningReminder = activeGroomingDate.atTime(8, 30).format(BLUEPRINT_TIME_FORMATTER)
             val afternoonReminder = activeGroomingDate.atTime(16, 30).format(BLUEPRINT_TIME_FORMATTER)
+            val selectedShop = selectedGroomingShopName()
             return """
                 Continue the pet-grooming workflow from the next missing operational milestone. The previous assistant answer stopped before closure.
                 Do not summarize, audit, or explain the history in prose. Start by calling the next needed tool.
                 All user-facing assistant messages, action candidates, plan titles, plan steps, SMS bodies, reminders, notifications, payment descriptions, and accounting descriptions must be Chinese. Proper nouns such as PetSmart, Driver, Kylin, CNY, and NT may stay as written. Do not write English prose on user-facing surfaces.
-                Continue in this order, choosing the first missing milestone only: PetSmart booking confirmation; Driver home-pickup confirmation; Driver delivery-to-PetSmart update from Driver; PetSmart arrival/progress/finish update; Driver pickup-from-PetSmart and return update; Driver home confirmation; payment; accounting; one short final status.
-                If Y selected the 9:00 option and PetSmart has not yet replied with a booking-confirmed SMS, the next tool must be a PetSmart confirmation SMS or a PetSmart wait. Do not message Driver in that state.
-                Driver is Y's private driver. For a 9:00 PetSmart appointment, the first Driver leg is 8:30 home pickup, then arrival at PetSmart by 9:00. For an accepted afternoon bath-only slot after 17:00, the first Driver SMS must explicitly say 16:30 home pickup and arrival at PetSmart by 17:00; do not ask Driver to pick up at 17:00 or say only "before 17:00". PetSmart progress, delay, revised pickup time, and finish must come from PetSmart. The second Driver leg is PetSmart to home only after PetSmart reports Kylin is finished, ready, or gives a revised pickup time after a delay.
-                The first Driver SMS must only cover the selected appointment's home pickup and PetSmart delivery. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in that first Driver SMS.
-                After PetSmart confirms the selected slot, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar user-facing greetings.
-                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected grooming-day departure time ($morningReminder for a 9:00 appointment, or $afternoonReminder for an afternoon 17:00 appointment) with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-PetSmart update" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-PetSmart.
-                After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports. For Driver delivery-to-PetSmart update, call system_wait_for_sms with Driver as the sender. Do not wait on PetSmart for arrival or progress until Driver has reported Kylin was delivered to PetSmart.
-                For the normal selected scope, use the pet salon search service's published price for Kylin's extra-large Bernese Mountain Dog size and selected bath/de-shedding scope. Do not use small-dog pricing, full grooming/styling pricing, or pickup coordination fees unless Y or PetSmart explicitly changes the scope.
-                Do not include prices, totals, fee details, or CNY in normal outbound PetSmart SMS. PetSmart SMS should only confirm time, service scope, and booking status unless there is an abnormal price issue.
+                Continue in this order, choosing the first missing milestone only: $selectedShop booking confirmation; Driver home-pickup confirmation; Driver delivery-to-shop update from Driver; $selectedShop arrival/progress/finish update; Driver pickup-from-shop and return update; Driver home confirmation; payment; accounting; one short final status.
+                If Y selected the 9:00 option and $selectedShop has not yet replied with a booking-confirmed SMS, the next tool must be a $selectedShop confirmation SMS or a $selectedShop wait. Do not message Driver in that state.
+                Driver is Y's private driver. For a 9:00 $selectedShop appointment, the first Driver leg is 8:30 home pickup, then arrival at $selectedShop by 9:00. For an accepted afternoon bath-only slot after 17:00, the first Driver SMS must explicitly say 16:30 home pickup and arrival at $selectedShop by 17:00; do not ask Driver to pick up at 17:00 or say only "before 17:00". For a 14:00 Harbor Paws Salon appointment, the first Driver SMS must explicitly say 13:30 home pickup and arrival at Harbor Paws Salon by 14:00. $selectedShop progress, delay, revised pickup time, and finish must come from $selectedShop. The second Driver leg is $selectedShop to home only after $selectedShop reports Kylin is finished, ready, or gives a revised pickup time after a delay.
+                The first Driver SMS must only cover the selected appointment's home pickup and $selectedShop delivery. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in that first Driver SMS.
+                After $selectedShop confirms the selected slot, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar user-facing greetings.
+                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected grooming-day departure time ($morningReminder for a 9:00 appointment, $afternoonReminder for an afternoon 17:00 appointment, or 13:30 for a 14:00 Harbor Paws Salon appointment) with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-shop update" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-shop.
+                After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports. For Driver delivery-to-shop update, call system_wait_for_sms with Driver as the sender. Do not wait on $selectedShop for arrival or progress until Driver has reported Kylin was delivered to $selectedShop.
+                For the normal selected scope, use the pet salon search service's published price for Kylin's extra-large Bernese Mountain Dog size and selected bath/de-shedding scope. Do not use small-dog pricing, full grooming/styling pricing, or pickup coordination fees unless Y or $selectedShop explicitly changes the scope.
+                Do not include prices, totals, fee details, or CNY in normal outbound $selectedShop SMS. $selectedShop SMS should only confirm time, service scope, and booking status unless there is an abnormal price issue.
                 For payment and accounting date, use $paymentDate for this run. Do not use the phone's real current year.
-                If payment is already completed but no expense has been recorded, the next tool must be device_system with action "accounting" for PetSmart, the same amount used for payment from the published service result, date $paymentDate, and a Chinese description for Kylin's grooming.
+                If payment is already completed but no expense has been recorded, the next tool must be device_system with action "accounting" for $selectedShop, the same amount used for payment from the published service result, date $paymentDate, and a Chinese description for Kylin's grooming.
                 A Driver promise to return Kylin later is not home confirmation. Do not call system_wait_for_sms for home confirmation until after Driver has been told to bring Kylin home or has reported Kylin is on the way home.
                 When home confirmation is the next missing milestone, send Driver a short SMS asking him to reply once Kylin is home, then call system_wait_for_sms with the returned watchId. Do not pay or account until that inbound Driver SMS explicitly says Kylin is home.
                 Do not ask Y whether to create routine reminders, and do not stop at a routine reminder question. Create routine reminders autonomously when useful, then continue to the next SMS signal.
@@ -1214,11 +1215,14 @@ class AgentExperienceViewModel
         private fun serviceTaskLogText(data: JSONObject?): String {
             val serviceId = data?.optString("serviceId").orEmpty()
             val action = data?.optString("action").orEmpty()
+            val actionLower = action.lowercase()
             return when {
-                serviceId == "pet_salon_search" -> {
+                serviceId == "pet_salon_search" && actionLower.contains("detail") -> {
                     val shopName = firstNamedEntity(data).ifBlank { "PetSmart" }
                     "添加 $shopName 到参与方。"
                 }
+                serviceId == "pet_salon_search" ->
+                    "查询附近宠物店。"
                 serviceId.isNotBlank() ->
                     "获取 $serviceId 服务信息。"
                 else ->
@@ -1358,8 +1362,8 @@ class AgentExperienceViewModel
                 sms.optString("to").ifBlank { sms.optString("from") }
             }
             val party = when {
-                contact.equals("PetSmart", ignoreCase = true) -> "PetSmart"
                 contact.equals("Driver", ignoreCase = true) -> "Driver"
+                isGroomingShopContact(contact) -> groomingShopNameIn(contact) ?: contact
                 else -> return emptyList()
             }
             if (existing.any { it.text.contains("添加") && it.text.contains(party) && it.text.contains("参与方") }) {
@@ -1398,8 +1402,33 @@ class AgentExperienceViewModel
             )
         }
 
+        private fun selectedGroomingShopName(): String =
+            if (selectedAppointmentIsAlternative()) "Harbor Paws Salon" else "PetSmart"
+
+        private fun isGroomingShopContact(contact: String): Boolean =
+            groomingShopNameIn(contact) != null ||
+                contact.contains("pet", ignoreCase = true) ||
+                contact.contains("salon", ignoreCase = true) ||
+                contact.contains("groom", ignoreCase = true) ||
+                contact.contains("宠物") ||
+                contact.contains("洗护") ||
+                contact.contains("洗澡")
+
+        private fun groomingShopNameIn(text: String): String? =
+            when {
+                text.contains("Harbor Paws", ignoreCase = true) ||
+                    text.contains("harbor-paws-salon", ignoreCase = true) ||
+                    text.contains("+86-756-888-1111") ||
+                    text.contains("756-888-1111") -> "Harbor Paws Salon"
+                text.contains("PetSmart", ignoreCase = true) ||
+                    text.contains("Pet Smart", ignoreCase = true) ||
+                    text.contains("+86-756-888-0001") ||
+                    text.contains("756-888-0001") -> "PetSmart"
+                else -> null
+            }
+
         private fun displayReminderBody(raw: String): String {
-            if (!raw.contains("PetSmart")) return raw
+            val shopName = groomingShopNameIn(raw) ?: return raw
             if (!raw.contains("司机") && !raw.contains("Driver")) return raw
 
             val normalized = raw
@@ -1407,15 +1436,20 @@ class AgentExperienceViewModel
                 .replace("5:00前送到 PetSmart", "17:00前送达 PetSmart")
 
             return when {
+                normalized.contains("13:30") ||
+                    normalized.contains("14:00") ||
+                    normalized.contains("下午2") ||
+                    normalized.contains("下午两点") ->
+                    "13:30 Driver 到家接 Kylin，14:00前送达 $shopName。"
                 normalized.contains("16:30") ||
                     normalized.contains("17:00") ->
-                    "16:30 Driver 到家接 Kylin，17:00前送达 PetSmart。"
+                    "16:30 Driver 到家接 Kylin，17:00前送达 $shopName。"
                 normalized.contains("8:30") ||
                     normalized.contains("08:30") ||
                     normalized.contains("9:00") ||
                     normalized.contains("09:00") ||
                     normalized.contains("9点") ->
-                    "08:30 Driver 到家接 Kylin，09:00前送达 PetSmart。"
+                    "08:30 Driver 到家接 Kylin，09:00前送达 $shopName。"
                 else -> normalized
             }
         }
@@ -1497,19 +1531,28 @@ class AgentExperienceViewModel
             body: String,
         ): LocalDateTime? =
             when {
-                contact.contains("PetSmart", ignoreCase = true) && isPetSmartBookingConfirmation(body) ->
+                isGroomingShopContact(contact) && isShopBookingConfirmation(body) ->
                     if (selectedAppointmentIsAfternoon() || body.contains("下午") || body.contains("5点") || body.contains("五点")) {
                         LocalDateTime.of(2027, 4, 25, 13, 6)
+                    } else if (selectedAppointmentIsAlternative() || body.contains("下午2点") || body.contains("下午两点") || body.contains("14:00") || body.contains("14点")) {
+                        LocalDateTime.of(2027, 4, 25, 13, 8)
                     } else {
                         LocalDateTime.of(2027, 4, 25, 13, 4)
                     }
-                contact.contains("PetSmart", ignoreCase = true) &&
+                isGroomingShopContact(contact) &&
                     (body.contains("下午2点") || body.contains("下午两点") || body.contains("14:00") || body.contains("14点")) ->
+                    if (selectedAppointmentIsAlternative() || contact.contains("Harbor", ignoreCase = true)) {
+                        LocalDateTime.of(2027, 4, 25, 13, 6)
+                    } else {
+                        LocalDateTime.of(2027, 4, 25, 13, 2)
+                    }
+                isGroomingShopContact(contact) && body.contains("9:00") ->
                     LocalDateTime.of(2027, 4, 25, 13, 2)
-                contact.contains("PetSmart", ignoreCase = true) && body.contains("9:00") ->
-                    LocalDateTime.of(2027, 4, 25, 13, 2)
-                contact.contains("PetSmart", ignoreCase = true) && (body.contains("下午") || body.contains("5点")) ->
+                isGroomingShopContact(contact) && (body.contains("下午") || body.contains("5点")) ->
                     LocalDateTime.of(2027, 4, 25, 13, 4)
+                contact.contains("Driver", ignoreCase = true) &&
+                    (body.contains("13:30") || body.contains("14:00") || body.contains("Harbor Paws")) ->
+                    LocalDateTime.of(2027, 4, 25, 13, 9)
                 contact.contains("Driver", ignoreCase = true) && body.contains("8:30") ->
                     LocalDateTime.of(2027, 4, 25, 13, 5)
                 contact.contains("Driver", ignoreCase = true) &&
@@ -1528,6 +1571,20 @@ class AgentExperienceViewModel
             eventType: String,
         ): LocalDateTime? =
             when {
+                eventType == "selected_shop_availability_confirmed" ->
+                    LocalDateTime.of(2027, 4, 25, 13, 7)
+                eventType == "selected_shop_booking_confirmed" ->
+                    LocalDateTime.of(2027, 4, 25, 13, 8)
+                eventType == "selected_shop_arrival_confirmed" ->
+                    selectedAppointmentArrivalClock()
+                eventType == "selected_shop_delayed_pickup" ->
+                    selectedAppointmentDelayClock()
+                eventType == "selected_shop_grooming_finished" ->
+                    if (selectedAppointmentIsAlternative()) {
+                        LocalDateTime.of(2027, 4, 26, 16, 30)
+                    } else {
+                        LocalDateTime.of(2027, 4, 26, 19, 20)
+                    }
                 eventType == "petsmart_availability_options" ->
                     LocalDateTime.of(2027, 4, 25, 13, 3)
                 eventType == "petsmart_afternoon_bath_only" ->
@@ -1554,19 +1611,19 @@ class AgentExperienceViewModel
                     LocalDateTime.of(2027, 4, 26, 19, 35)
                 eventType == "driver_home_arrival" ->
                     LocalDateTime.of(2027, 4, 26, 20, 0)
-                contact.contains("PetSmart", ignoreCase = true) &&
+                isGroomingShopContact(contact) &&
                     (body.contains("上午九点") || body.contains("上午9点") || body.contains("9点")) ->
                     LocalDateTime.of(2027, 4, 25, 13, 3)
-                contact.contains("PetSmart", ignoreCase = true) &&
+                isGroomingShopContact(contact) &&
                     (body.contains("预约已确认") || body.contains("已确认")) ->
-                    LocalDateTime.of(2027, 4, 25, 13, 4)
+                    if (selectedAppointmentIsAlternative()) LocalDateTime.of(2027, 4, 25, 13, 8) else LocalDateTime.of(2027, 4, 25, 13, 4)
                 contact.contains("Driver", ignoreCase = true) &&
                     (body.contains("8:30") || body.contains("来接")) ->
                     selectedDriverPickupClock(body)
                 contact.contains("Driver", ignoreCase = true) &&
                     (body.contains("送到了") || body.contains("已送到") || body.contains("到店")) ->
                     selectedAppointmentArrivalClock()
-                contact.contains("PetSmart", ignoreCase = true) &&
+                isGroomingShopContact(contact) &&
                     (body.contains("19:20") || body.contains("七点二十") || body.contains("晚一点")) ->
                     LocalDateTime.of(2027, 4, 26, 16, 30)
                 contact.contains("Driver", ignoreCase = true) &&
@@ -1578,7 +1635,7 @@ class AgentExperienceViewModel
                 else -> null
             }
 
-        private fun isPetSmartBookingConfirmation(body: String): Boolean =
+        private fun isShopBookingConfirmation(body: String): Boolean =
             !body.contains("请问") &&
                 !body.contains("是否") &&
                 body.contains("确认") &&
@@ -1601,12 +1658,19 @@ class AgentExperienceViewModel
                     LocalDateTime.of(2027, 4, 26, 8, 30)
                 text.contains("20:00") || text.contains("8:00") ->
                     LocalDateTime.of(2027, 4, 26, 20, 0)
+                text.contains("13:30") || text.contains("14:00") ->
+                    LocalDateTime.of(2027, 4, 26, 13, 30)
                 else -> null
             }
         }
 
         private fun selectedDriverPickupClock(body: String): LocalDateTime =
             when {
+                selectedAppointmentIsAlternative() ||
+                    body.contains("13:30") ||
+                    body.contains("14:00") ||
+                    body.contains("Harbor Paws", ignoreCase = true) ->
+                    LocalDateTime.of(2027, 4, 26, 13, 30)
                 body.contains("16:30") || body.contains("17:00") || body.contains("下午") || selectedAppointmentIsAfternoon() ->
                     LocalDateTime.of(2027, 4, 26, 16, 30)
                 else ->
@@ -1614,21 +1678,24 @@ class AgentExperienceViewModel
             }
 
         private fun selectedAppointmentArrivalClock(): LocalDateTime =
-            if (selectedAppointmentIsAfternoon()) {
-                LocalDateTime.of(2027, 4, 26, 17, 0)
-            } else {
-                LocalDateTime.of(2027, 4, 26, 9, 0)
+            when {
+                selectedAppointmentIsAlternative() -> LocalDateTime.of(2027, 4, 26, 14, 0)
+                selectedAppointmentIsAfternoon() -> LocalDateTime.of(2027, 4, 26, 17, 0)
+                else -> LocalDateTime.of(2027, 4, 26, 9, 0)
             }
 
         private fun selectedAppointmentDelayClock(): LocalDateTime =
-            if (selectedAppointmentIsAfternoon()) {
-                LocalDateTime.of(2027, 4, 26, 18, 30)
-            } else {
-                LocalDateTime.of(2027, 4, 26, 16, 30)
+            when {
+                selectedAppointmentIsAlternative() -> LocalDateTime.of(2027, 4, 26, 16, 30)
+                selectedAppointmentIsAfternoon() -> LocalDateTime.of(2027, 4, 26, 18, 30)
+                else -> LocalDateTime.of(2027, 4, 26, 16, 30)
             }
 
         private fun selectedAppointmentIsAfternoon(): Boolean =
             latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingBookAfternoonBathOnly
+
+        private fun selectedAppointmentIsAlternative(): Boolean =
+            latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingFindAlternative
 
         private fun parseToolData(content: String): JSONObject? {
             val json = content.substringAfter('\n', missingDelimiterValue = "").trim()

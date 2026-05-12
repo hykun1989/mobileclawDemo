@@ -87,6 +87,7 @@ class AgentExperienceViewModel
         private var taskSortCounter = 0L
         private val deliveredTimelineEvents = mutableSetOf<String>()
         private val taskStates = linkedMapOf<String, AgentTaskState>()
+        private val taskSessionIds = mutableMapOf<String, String>()
         private val pinnedTaskIds = linkedSetOf<String>()
         private val groomingMilestones = mutableSetOf<PetGroomingMilestone>()
         private val endedCallNotificationIds = mutableSetOf<String>()
@@ -150,6 +151,7 @@ class AgentExperienceViewModel
             pendingSelectedActionLabel = null
             lastGroomingPaymentAmount = null
             awaitingInitialPrecheckDecision = true
+            taskSessionIds.clear()
             groomingMilestones.clear()
             val baseFrame = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
             val precheckDecision = PetGroomingScenarioSpec.precheckDecision()
@@ -246,11 +248,25 @@ class AgentExperienceViewModel
 
         private fun currentSessionRoute(): AgentSessionRoute =
             _frame.value.activeTaskId.let { activeTaskId ->
+                val sessionId = sessionIdForTask(activeTaskId)
                 AgentSessionRoute(
-                    sessionId = currentChatId ?: activeTaskId,
+                    sessionId = sessionId,
                     taskId = activeTaskId,
                 )
             }
+
+        private fun sessionIdForTask(taskId: String?): String {
+            val sessionId = if (taskId == null) {
+                currentChatId ?: "run-${scenario.scenarioId}-${UUID.randomUUID().toString().take(8)}"
+            } else {
+                // 每个任务拥有独立 Agent 上下文，避免多任务互相污染。
+                taskSessionIds.getOrPut(taskId) {
+                    "task-$taskId-${UUID.randomUUID().toString().take(8)}"
+                }
+            }
+            currentChatId = sessionId
+            return sessionId
+        }
 
         fun selectTask(taskId: String) {
             val task = taskStates[taskId] ?: return
@@ -258,6 +274,7 @@ class AgentExperienceViewModel
                 taskStates[it.id] = _frame.value.captureTaskState(it)
             }
             // 查看任务不改变任务活跃顺序，只有真实事件更新才刷新排序。
+            currentChatId = taskSessionIds[taskId]
             _frame.update { task.applyToFrame(it) }
         }
 
@@ -413,6 +430,7 @@ class AgentExperienceViewModel
 
         private suspend fun runAgentTurn(chatId: String, text: String) {
             try {
+                currentChatId = chatId
                 if (settings.getApiKey().isBlank()) {
                     _frame.update {
                         it.withPendingSelectedAction().copy(

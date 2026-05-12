@@ -121,6 +121,7 @@ class ToolCallAgentLoop @Inject constructor(
     ) {
         var toolDefs = initialToolDefs
         var turnsRemaining = MAX_TURNS
+        val executedToolSignatures = mutableSetOf<String>()
         while (turnsRemaining-- > 0) {
             val response = llm.chat(
                 messages = messages,
@@ -166,6 +167,18 @@ class ToolCallAgentLoop @Inject constructor(
             }
 
             for (tc in response.toolCalls) {
+                val signature = toolSignature(tc)
+                if (!executedToolSignatures.add(signature)) {
+                    val error = "Stopped: repeated internal action '${tc.name}' with identical arguments."
+                    messages.add(LlmMessage(role = "tool", content = error, toolCallId = tc.id, name = tc.name))
+                    sessions.appendToolMessage(sessionKey, error, tc.id, tc.name)
+                    sessions.appendAssistantMessage(sessionKey, error)
+                    memoryFiles.appendHistoryLine("assistant: $error")
+                    emit(RuntimeEvent.ToolFinished(tc.name, tc.id, success = false, summary = error, detail = error))
+                    emit(RuntimeEvent.StateChanged("FAILED"))
+                    emit(RuntimeEvent.AssistantMessage(error))
+                    return
+                }
                 emit(RuntimeEvent.ToolStarted(tc.name, tc.id))
                 emit(RuntimeEvent.StateChanged("EXECUTING_TOOL"))
 
@@ -527,6 +540,13 @@ class ToolCallAgentLoop @Inject constructor(
             val promptText: String,
             val actions: List<ActionOption>,
         )
+
+        private fun toolSignature(toolCall: LlmToolCall): String =
+            "${toolCall.name}:${normalizedArguments(toolCall.argumentsJson)}"
+
+        private fun normalizedArguments(argumentsJson: String): String =
+            runCatching { JSONObject(argumentsJson).toString() }
+                .getOrElse { argumentsJson.trim() }
 
         private fun decisionPromptFromToolData(dataJson: String?): ToolDecisionPrompt? {
             if (dataJson.isNullOrBlank()) return null

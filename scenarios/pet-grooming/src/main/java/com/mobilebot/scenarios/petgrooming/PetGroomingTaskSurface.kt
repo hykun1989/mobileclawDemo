@@ -68,6 +68,7 @@ data class PetGroomingTaskUpdate(
     val conversations: List<PetGroomingSurfaceConversation> = emptyList(),
     val logs: List<PetGroomingSurfaceLog> = emptyList(),
     val participants: List<PetGroomingSurfaceParticipant>? = null,
+    val participantsToAdd: List<PetGroomingSurfaceParticipant> = emptyList(),
     val progress: PetGroomingSurfaceProgress,
     val decision: PetGroomingSurfaceDecision? = null,
     val activeActionValue: String? = null,
@@ -222,6 +223,23 @@ object PetGroomingTaskSurface {
             ),
         )
 
+    fun propertyParkingNotice(messageBody: String): PetGroomingTaskUpdate =
+        PetGroomingTaskUpdate(
+            status = PetGroomingSurfaceStatus.RUNNING,
+            subtitle = "司机改走东门接送",
+            logs = listOf(
+                PetGroomingSurfaceLog("收到物业通知：$messageBody"),
+                PetGroomingSurfaceLog("更新司机路线：优先走东门，避开 B2 西侧临停区。"),
+            ),
+            participantsToAdd = listOf(PROPERTY),
+            progress = PetGroomingSurfaceProgress(
+                label = "进行中",
+                detail = "接送路线已更新",
+                completed = 5,
+                total = 7,
+            ),
+        )
+
     fun driverArrivedPetSmart(messageBody: String): PetGroomingTaskUpdate =
         PetGroomingTaskUpdate(
             status = PetGroomingSurfaceStatus.RUNNING,
@@ -315,5 +333,12 @@ object PetGroomingTaskSurface {
         label = "陈",
         displayName = "老陈",
         role = "driver",
+    )
+
+    private val PROPERTY = PetGroomingSurfaceParticipant(
+        id = "property-service",
+        label = "物",
+        displayName = "物业管家",
+        role = "property_service",
     )
 }

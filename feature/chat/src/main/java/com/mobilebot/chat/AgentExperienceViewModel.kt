@@ -1452,13 +1452,16 @@ class AgentExperienceViewModel
             activate: Boolean = false,
         ) {
             updateTaskState(PetGroomingTaskSurface.TASK_ID, activate = activate) { task ->
+                val baseParticipants = update.participants?.map { it.toAgentParticipant() } ?: task.participants
                 task.copy(
                     status = update.status.toAgentStatus(),
                     updatedTimeText = timeText,
                     subtitle = update.subtitle,
                     conversationItems = task.conversationItems + update.conversations.map { it.toConversationItem() },
                     taskLogs = appendTaskLogs(task.taskLogs, update.logs.toTaskLogs(timeText)),
-                    participants = update.participants?.map { it.toAgentParticipant() } ?: task.participants,
+                    participants = update.participantsToAdd.fold(baseParticipants) { participants, participant ->
+                        participants.withParticipant(participant.toAgentParticipant())
+                    },
                     progressLine = update.progress.toProgressLine(),
                     decisionPrompt = update.decision?.toDecisionPrompt(),
                     activeActionValue = update.activeActionValue,
@@ -1830,36 +1833,10 @@ class AgentExperienceViewModel
         }
 
         private fun handlePropertyParkingNotice(event: RuntimeNotificationEvent) {
-            updateTaskState(PET_TASK_ID, activate = false) { task ->
-                task.copy(
-                    updatedTimeText = blueprintTimeText(event.occurredAt),
-                    subtitle = "司机改走东门接送",
-                    taskLogs = appendTaskLogs(
-                        task.taskLogs,
-                        listOf(
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "收到物业通知：${event.body}",
-                            ),
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "更新司机路线：优先走东门，避开 B2 西侧临停区。",
-                            ),
-                        ),
-                    ),
-                    participants = task.participants.withParticipant(
-                        AgentParticipant("property-service", "物", "物业管家", "property_service"),
-                    ),
-                    progressLine = AgentProgressLine(
-                        label = "进行中",
-                        detail = "接送路线已更新",
-                        completed = task.progressLine.completed,
-                        total = task.progressLine.total,
-                    ),
-                )
-            }
+            applyPetGroomingTaskUpdate(
+                update = PetGroomingTaskSurface.propertyParkingNotice(event.body),
+                timeText = blueprintTimeText(event.occurredAt),
+            )
         }
 
         private fun handlePharmacyRestock(event: RuntimeNotificationEvent) {
@@ -2520,7 +2497,6 @@ class AgentExperienceViewModel
             private const val TOOL_ROUND_LIMIT_PREFIX = "Stopped: too many tool call rounds"
             private const val SCRIPTED_ACTION_PREFIX = "MULTI:"
             private const val ONE_HOUR_SCENARIO_ID = "one_hour_aio"
-            private const val PET_TASK_ID = "pet-grooming-live"
             private const val PACKAGE_TASK_ID = "coldchain-delivery-live"
             private const val HEALTH_TASK_ID = "health-supply-live"
             private val INITIAL_SCENARIO_CLOCK: LocalDateTime = LocalDateTime.of(2027, 4, 25, 13, 0)

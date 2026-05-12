@@ -58,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -662,10 +663,16 @@ private fun SessionArea(
     val activeDecision = frame.decisionPrompt != null
     val listState = rememberLazyListState()
     val lastItemIndex = messages.lastIndex + if (actions.isNotEmpty()) 1 else 0
+    val latestMessageKey = messages.lastOrNull()?.let { message ->
+        "${message.id}:${message.role}:${message.text}"
+    }.orEmpty()
+    val actionsKey = actions.joinToString("|") { action -> "${action.label}:${action.value}" }
 
-    LaunchedEffect(lastItemIndex, frame.statusLabel) {
+    LaunchedEffect(frame.activeTaskId, latestMessageKey, actionsKey, lastItemIndex, blueprintOpen) {
         if (lastItemIndex >= 0) {
-            listState.animateScrollToItem(lastItemIndex)
+            // 蓝图区展开会压缩会话区高度，需要重新锚定到最新消息。
+            withFrameNanos { }
+            listState.scrollToItem(lastItemIndex)
         }
     }
 

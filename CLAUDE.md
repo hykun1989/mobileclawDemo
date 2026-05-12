@@ -185,7 +185,7 @@ interface LlmClient {
 
 - **JUnit 4** for JVM unit tests, placed in `<module>/src/test/java/`
 - 11 test files across `core:domain` (9), `core:bridge` (1), `core:data` (1)
-- Integration tests use `FakeDeviceCapabilityBridge` + `Recording*Bridge` test doubles in `core/domain/src/test/java/com/mobilebot/domain/testdoubles/`
+- Integration tests use `RecordingDeviceCapabilityBridge` + `Recording*Bridge` test doubles in `core/domain/src/test/java/com/mobilebot/domain/testdoubles/`
 - **Maestro** UI automation in `maestro/flows/` (requires separate installation)
 - No instrumented tests currently
 

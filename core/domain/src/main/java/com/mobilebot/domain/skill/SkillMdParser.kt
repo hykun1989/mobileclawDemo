@@ -118,6 +118,7 @@ object SkillMdParser {
                 disableModelInvocation = fm.getString("disable-model-invocation")?.toBooleanStrictOrNull() ?: false,
                 promptSummary = fm.getString("prompt-summary") ?: description,
                 promptBody = body.ifBlank { null },
+                references = fm.getStringList("references"),
             ),
         )
     }

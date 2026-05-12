@@ -181,7 +181,7 @@ data class AgentExperienceFrame(
                     AgentTimelineEvent(
                         id = "ready",
                         title = "Ready to coordinate",
-                        detail = "The agent has the grooming context ready and can begin when started.",
+                        detail = "The agent is waiting for the next system signal.",
                         status = AgentTimelineStatus.PENDING,
                     ),
                 ),

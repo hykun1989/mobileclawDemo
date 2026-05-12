@@ -7,6 +7,35 @@ object PetGroomingContacts {
     fun selectedShopName(useAlternative: Boolean): String =
         if (useAlternative) ALTERNATIVE_SHOP else PREFERRED_SHOP
 
+    fun defaultShopName(): String = PREFERRED_SHOP
+
+    fun displayContactName(contact: String): String =
+        when {
+            contact.equals("Driver", ignoreCase = true) -> "Driver"
+            isGroomingShopContact(contact) -> shopNameIn(contact) ?: contact
+            else -> contact
+        }
+
+    fun roleForContact(contact: String): String {
+        val lower = contact.lowercase()
+        return when {
+            lower.contains("driver") || contact.contains("司机") -> "private_driver"
+            lower.contains("pet") || lower.contains("salon") || contact.contains("宠物") || contact.contains("洗护") -> "grooming_service"
+            else -> "service_contact"
+        }
+    }
+
+    fun labelForContact(contact: String): String {
+        val lower = contact.lowercase()
+        return when {
+            lower.contains("driver") || contact.contains("司机") -> "D"
+            lower.contains("petsmart") -> "PS"
+            shopNameIn(contact) != null -> shopNameIn(contact).orEmpty().take(2).uppercase()
+            contact.isNotBlank() -> contact.take(2).uppercase()
+            else -> "?"
+        }
+    }
+
     fun isGroomingShopContact(contact: String): Boolean =
         shopNameIn(contact) != null ||
             contact.contains("pet", ignoreCase = true) ||

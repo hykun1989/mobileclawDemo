@@ -152,12 +152,10 @@ class AgentExperienceViewModel
             awaitingInitialPrecheckDecision = true
             groomingMilestones.clear()
             val baseFrame = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
+            val precheckDecision = PetGroomingScenarioSpec.precheckDecision()
             val precheckPrompt = DecisionPrompt(
-                text = "明天周日了，还是照常给麒麟约洗澡么？",
-                actions = listOf(
-                    ActionButton("好的", "USER_INTENT:pet_grooming.keep_current_week"),
-                    ActionButton("改天再说", "USER_INTENT:pet_grooming.defer_current_week"),
-                ),
+                text = precheckDecision.text,
+                actions = precheckDecision.actions.map { ActionButton(it.label, it.key) },
             )
             _frame.value = baseFrame.copy(
                 statusLabel = "Waiting for decision",
@@ -338,7 +336,7 @@ class AgentExperienceViewModel
                             AgentTaskLog(
                                 id = nextId("task"),
                                 timeText = blueprintTimeText(scenarioClock),
-                                text = "创建麒麟日常洗护任务。",
+                                text = PetGroomingScenarioSpec.initialTaskLogText(),
                             )
                         } else {
                             null
@@ -369,8 +367,7 @@ class AgentExperienceViewModel
                         """
                             ${PetGroomingScenarioSpec.triggerText(scenarioClock)}
 
-                            Y already answered the weekly precheck decision. Authoritative decision: ${normalized.agentText}
-                            Do not ask the weekly precheck question again. If Y keeps this week, continue booking and coordination from that decision. If Y defers this week, acknowledge briefly and stop this run without contacting PetSmart or Driver.
+                            ${PetGroomingScenarioSpec.initialDecisionInstruction(normalized.agentText)}
                         """.trimIndent()
                     } else {
                         normalized.agentText
@@ -380,7 +377,7 @@ class AgentExperienceViewModel
         }
 
         private fun completeDeferredGroomingRun() {
-            val message = "好的，那下周再说。"
+            val message = PetGroomingScenarioSpec.deferredCompletionMessage()
             _frame.update {
                 val visibleBase = it.withPendingSelectedAction()
                 visibleBase.copy(
@@ -473,7 +470,7 @@ class AgentExperienceViewModel
                                 busy = false,
                                 statusLabel = "Needs attention",
                                 finalSummary = null,
-                                error = "The grooming workflow stopped before closure.",
+                                error = PetGroomingScenarioSpec.workflowStoppedError(),
                                 decisionPrompt = null,
                                 activeActionValue = null,
                                 progressLine = AgentProgressLine(
@@ -500,17 +497,17 @@ class AgentExperienceViewModel
                             finalSummary = null,
                             progressLine = AgentProgressLine(
                                 label = "Continuing",
-                                detail = "Advancing to the next missing grooming milestone.",
+                                detail = PetGroomingScenarioSpec.nextMilestoneDetail(),
                                 completed = completedStageCount(it),
                                 total = totalStageCount(it),
                             ),
                             timeline = it.timeline + AgentTimelineEvent(
                                 id = nextId("guard"),
                                 title = "Workflow continuing",
-                                detail = "The grooming flow remains open until home confirmation, payment, and accounting are complete.",
+                                detail = PetGroomingScenarioSpec.closureRequiredDetail(),
                                 status = AgentTimelineStatus.RUNNING,
                             ),
-                            debugTrace = appendTrace(it.debugTrace, "continuation -> grooming workflow remains open"),
+                            debugTrace = appendTrace(it.debugTrace, PetGroomingScenarioSpec.continuationTrace()),
                         )
                     }
                     runAgentTurn(chatId, continuationPrompt)
@@ -538,7 +535,7 @@ class AgentExperienceViewModel
         }
 
         private fun continuationPromptFor(frame: AgentExperienceFrame): String? {
-            if (frame.scenario.scenarioId != "pet-grooming") return null
+            if (!PetGroomingScenarioSpec.matches(frame.scenario.scenarioId)) return null
             if (frame.decisionPrompt != null || frame.error != null) return null
             if (frame.finalSummary.isNullOrBlank()) return null
             if (groomingDeferred(frame)) return null
@@ -553,12 +550,12 @@ class AgentExperienceViewModel
             )
 
         private fun groomingDeferred(frame: AgentExperienceFrame): Boolean {
-            if (frame.scenario.scenarioId != "pet-grooming") return false
+            if (!PetGroomingScenarioSpec.matches(frame.scenario.scenarioId)) return false
             return latestAgentDecisionIntent == PetGroomingDecisionIntents.DeferCurrentWeek
         }
 
         private fun shouldScheduleDeferredRetrigger(frame: AgentExperienceFrame): Boolean =
-            frame.scenario.scenarioId == "pet-grooming" &&
+            PetGroomingScenarioSpec.matches(frame.scenario.scenarioId) &&
                 frame.finalSummary != null &&
                 frame.decisionPrompt == null &&
                 frame.error == null &&
@@ -604,7 +601,7 @@ class AgentExperienceViewModel
             )
 
         private fun groomingClosureSatisfied(frame: AgentExperienceFrame): Boolean {
-            if (frame.scenario.scenarioId != "pet-grooming") return false
+            if (!PetGroomingScenarioSpec.matches(frame.scenario.scenarioId)) return false
             return groomingMilestones.containsAll(
                 setOf(
                     PetGroomingMilestone.HOME_CONFIRMED,
@@ -824,7 +821,7 @@ class AgentExperienceViewModel
                             } else {
                                 val displayText = compactFinalSummary(content)
                                 val silentProgress =
-                                    scenario.scenarioId == "pet-grooming" &&
+                                    PetGroomingScenarioSpec.matches(scenario.scenarioId) &&
                                     displayText == null &&
                                     PetGroomingConversationRules.isTransientNarration(content)
                                 val visibleBase = base.withPendingSelectedAction()
@@ -868,12 +865,11 @@ class AgentExperienceViewModel
         private fun visibleAssistantUpdate(content: String): String? {
             if (content.isBlank() || content.length > MAX_VISIBLE_ASSISTANT_UPDATE_CHARS) return null
             val lower = content.lowercase()
-            if (scenario.scenarioId == "pet-grooming" && PetGroomingConversationRules.isTransientNarration(content)) return null
+            if (PetGroomingScenarioSpec.matches(scenario.scenarioId) && PetGroomingConversationRules.isTransientNarration(content)) return null
             if (
                 lower.contains("system_wait_for_sms") ||
                 lower.contains("device_system") ||
                     lower.contains("device system") ||
-                    lower.contains("pet-grooming workflow") ||
                     lower.contains("workflow requires") ||
                     lower.contains("required closure") ||
                     lower.contains("closure requirements") ||
@@ -905,14 +901,14 @@ class AgentExperienceViewModel
         private fun compactFinalSummary(content: String): String? {
             val lower = content.lowercase()
             return when {
-                scenario.scenarioId == "pet-grooming" &&
+                PetGroomingScenarioSpec.matches(scenario.scenarioId) &&
                     PetGroomingConversationRules.isTransientNarration(content) -> null
-                scenario.scenarioId == "pet-grooming" &&
+                PetGroomingScenarioSpec.matches(scenario.scenarioId) &&
                     isRoutineReminderQuestion(content) -> null
-                scenario.scenarioId == "pet-grooming" &&
-                    lower.contains("petsmart") &&
-                    content.contains("最终价格") -> "已向 PetSmart 发送短信，确认周日可选时段和服务内容。"
-                scenario.scenarioId == "pet-grooming" &&
+                PetGroomingScenarioSpec.matches(scenario.scenarioId) &&
+                    PetGroomingContacts.isGroomingShopContact(content) &&
+                    content.contains("最终价格") -> "已向服务方发送短信，确认可选时段和服务内容。"
+                PetGroomingScenarioSpec.matches(scenario.scenarioId) &&
                     PetGroomingConversationRules.isCompletionText(content) ->
                     PetGroomingConversationRules.compactCompletionText(content, lastGroomingPaymentAmount)
                 (
@@ -938,7 +934,7 @@ class AgentExperienceViewModel
                 }
 
         private fun isRoutineReminderQuestion(text: String): Boolean {
-            return scenario.scenarioId == "pet-grooming" &&
+            return PetGroomingScenarioSpec.matches(scenario.scenarioId) &&
                 PetGroomingConversationRules.isRoutineReminderQuestion(
                     text = text,
                     looksLikeDecisionRequest = looksLikeDecisionRequest(text),
@@ -1027,7 +1023,7 @@ class AgentExperienceViewModel
 
         private fun toolStartEvent(tool: String): AgentTimelineEvent {
             val (title, detail) = when (tool) {
-                "use_skill" -> "流程已选择" to "加载麒麟洗护协调规则。"
+                "use_skill" -> "流程已选择" to "加载协调规则。"
                 "create_plan" -> "开始规划" to "准备执行阶段。"
                 "device_system" -> "检查上下文" to "读取手机上下文和服务状态。"
                 "system_search_contacts" -> "检查联系人" to "确认相关参与方。"
@@ -1062,7 +1058,7 @@ class AgentExperienceViewModel
             ok: Boolean,
         ): AgentTimelineEvent {
             val detail = when (tool) {
-                "use_skill" -> "麒麟洗护协调规则已启用。"
+                "use_skill" -> "协调规则已启用。"
                 "create_plan" -> "执行阶段已更新。"
                 "device_system" -> systemSignalFromDeviceResult(content)
                 "system_search_contacts" -> systemSignalFromDeviceResult(content)
@@ -1116,7 +1112,7 @@ class AgentExperienceViewModel
 
         private fun memorySignal(content: String): String =
             when {
-                content.contains("\"key\":\"memory\"", ignoreCase = true) -> "麒麟服务偏好已加载。"
+                content.contains("\"key\":\"memory\"", ignoreCase = true) -> "服务偏好已加载。"
                 content.contains("\"key\":\"places\"", ignoreCase = true) -> "家庭和常用地点已加载。"
                 content.contains("\"key\":\"social\"", ignoreCase = true) -> "可信服务关系已加载。"
                 else -> "用户资料已加载。"
@@ -1241,7 +1237,7 @@ class AgentExperienceViewModel
             val actionLower = action.lowercase()
             return when {
                 serviceId == "pet_salon_search" && actionLower.contains("detail") -> {
-                    val shopName = firstNamedEntity(data).ifBlank { "PetSmart" }
+                    val shopName = firstNamedEntity(data).ifBlank { PetGroomingContacts.defaultShopName() }
                     "添加 $shopName 到参与方。"
                 }
                 serviceId == "pet_salon_search" ->
@@ -1348,8 +1344,8 @@ class AgentExperienceViewModel
             val trimmed = name.trim()
             val lower = trimmed.lowercase()
             val role = when {
-                lower.contains("driver") || trimmed.contains("司机") -> "private_driver"
-                lower.contains("pet") || lower.contains("salon") || trimmed.contains("宠物") || trimmed.contains("洗护") -> "grooming_service"
+                PetGroomingContacts.roleForContact(trimmed) == "private_driver" -> "private_driver"
+                PetGroomingContacts.roleForContact(trimmed) == "grooming_service" -> "grooming_service"
                 else -> "service"
             }
             return AgentParticipant(
@@ -1361,15 +1357,10 @@ class AgentExperienceViewModel
         }
 
         private fun participantLabel(name: String): String {
-            val lower = name.lowercase()
-            return when {
-                lower.contains("driver") || name.contains("司机") -> "D"
-                lower.contains("petsmart") -> "PS"
-                else -> {
-                    val letters = name.filter { it.isLetterOrDigit() }
-                    if (letters.isBlank()) name.take(1) else letters.take(2).uppercase()
-                }
-            }
+            val label = PetGroomingContacts.labelForContact(name)
+            if (label != "?") return label
+            val letters = name.filter { it.isLetterOrDigit() }
+            return if (letters.isBlank()) name.take(1) else letters.take(2).uppercase()
         }
 
         private fun partyTaskLogsFromToolResult(
@@ -1384,11 +1375,9 @@ class AgentExperienceViewModel
             val contact = sms.optString("displayName").ifBlank {
                 sms.optString("to").ifBlank { sms.optString("from") }
             }
-            val party = when {
-                contact.equals("Driver", ignoreCase = true) -> "Driver"
-                PetGroomingContacts.isGroomingShopContact(contact) -> PetGroomingContacts.shopNameIn(contact) ?: contact
-                else -> return emptyList()
-            }
+            val party = PetGroomingContacts.displayContactName(contact).takeIf {
+                it != contact || PetGroomingContacts.roleForContact(contact) == "private_driver"
+            } ?: return emptyList()
             if (existing.any { it.text.contains("添加") && it.text.contains(party) && it.text.contains("参与方") }) {
                 return emptyList()
             }
@@ -1935,7 +1924,7 @@ class AgentExperienceViewModel
             tool: String,
             content: String,
         ) {
-            if (scenario.scenarioId != "pet-grooming") return
+            if (!PetGroomingScenarioSpec.matches(scenario.scenarioId)) return
             if (!isSystemRuntimeTool(tool)) return
             val data = parseToolData(content) ?: return
             val update = PetGroomingMilestoneDetector.fromSystemRuntimeData(data)
@@ -1970,13 +1959,13 @@ class AgentExperienceViewModel
         }
 
         private fun inferScenarioActions(promptText: String): List<ActionButton> {
-            if (scenario.scenarioId != "pet-grooming") return emptyList()
+            if (!PetGroomingScenarioSpec.matches(scenario.scenarioId)) return emptyList()
             return PetGroomingConversationRules.actionCandidates(promptText)
                 .map { ActionButton(label = it.label, value = it.value) }
         }
 
         private fun shouldSuppressResolvedGroomingPrompt(text: String): Boolean {
-            if (scenario.scenarioId != "pet-grooming") return false
+            if (!PetGroomingScenarioSpec.matches(scenario.scenarioId)) return false
             return PetGroomingConversationRules.shouldSuppressResolvedPrompt(text, latestAgentDecisionIntent)
         }
 
@@ -1984,7 +1973,7 @@ class AgentExperienceViewModel
             label: String,
             value: String,
         ): String {
-            if (scenario.scenarioId != "pet-grooming") return label
+            if (!PetGroomingScenarioSpec.matches(scenario.scenarioId)) return label
             return PetGroomingConversationRules.compactActionLabel(label, value)
         }
 
@@ -2000,7 +1989,7 @@ class AgentExperienceViewModel
         }
 
         private fun compactDecisionPromptText(text: String): String {
-            if (scenario.scenarioId == "pet-grooming") {
+            if (PetGroomingScenarioSpec.matches(scenario.scenarioId)) {
                 return PetGroomingConversationRules.compactDecisionPromptText(text) ?: text
             }
             return text
@@ -2042,7 +2031,7 @@ class AgentExperienceViewModel
                 .toList()
 
         private fun compactInlineActionLabel(value: String): String {
-            if (scenario.scenarioId == "pet-grooming" && PetGroomingConversationRules.isNonActionFact(value)) return ""
+            if (PetGroomingScenarioSpec.matches(scenario.scenarioId) && PetGroomingConversationRules.isNonActionFact(value)) return ""
             val timeRange = Regex("""^\d{1,2}:\d{2}\s*[–-]\s*\d{1,2}:\d{2}""").find(value)?.value
             return timeRange ?: value
         }

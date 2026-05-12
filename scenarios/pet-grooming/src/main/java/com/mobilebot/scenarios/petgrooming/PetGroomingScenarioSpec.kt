@@ -1,5 +1,7 @@
 package com.mobilebot.scenarios.petgrooming
 
+import com.mobilebot.scenarios.runtime.ScenarioAction
+import com.mobilebot.scenarios.runtime.ScenarioDecision
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -35,6 +37,36 @@ object PetGroomingScenarioSpec {
                 ${sharedRules()}
             """.trimIndent(),
         )
+
+    fun matches(scenarioId: String): Boolean = scenarioId == SCENARIO_ID
+
+    fun precheckDecision(): ScenarioDecision =
+        ScenarioDecision(
+            text = "明天周日了，还是照常给麒麟约洗澡么？",
+            actions = listOf(
+                ScenarioAction("好的", "USER_INTENT:pet_grooming.keep_current_week"),
+                ScenarioAction("改天再说", "USER_INTENT:pet_grooming.defer_current_week"),
+            ),
+        )
+
+    fun initialTaskLogText(): String = "创建麒麟日常洗护任务。"
+
+    fun deferredCompletionMessage(): String = "好的，那下周再说。"
+
+    fun initialDecisionInstruction(agentText: String): String =
+        """
+            Y already answered the weekly precheck decision. Authoritative decision: $agentText
+            Do not ask the weekly precheck question again. If Y keeps this week, continue booking and coordination from that decision. If Y defers this week, acknowledge briefly and stop this run without contacting PetSmart or Driver.
+        """.trimIndent()
+
+    fun workflowStoppedError(): String = "The grooming workflow stopped before closure."
+
+    fun nextMilestoneDetail(): String = "Advancing to the next missing task milestone."
+
+    fun closureRequiredDetail(): String =
+        "The grooming flow remains open until home confirmation, payment, and accounting are complete."
+
+    fun continuationTrace(): String = "continuation -> grooming workflow remains open"
 
     fun triggerText(clock: LocalDateTime): String {
         val precheckDate = clock.toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)

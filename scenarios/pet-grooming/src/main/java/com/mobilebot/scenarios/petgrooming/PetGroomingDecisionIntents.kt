@@ -1,10 +1,10 @@
-﻿package com.mobilebot.chat
+package com.mobilebot.scenarios.petgrooming
 
 import com.mobilebot.domain.agent.AgentDecisionIntents
 import com.mobilebot.domain.agent.AgentDecisionIntent
 
 // 场景候选意图由场景层提供；核心 Agent 只负责归一化。
-internal object PetGroomingDecisionIntents {
+object PetGroomingDecisionIntents {
     val KeepCurrentWeek = AgentDecisionIntent(
         id = "pet_grooming.keep_current_week",
         displayLabel = "好的",

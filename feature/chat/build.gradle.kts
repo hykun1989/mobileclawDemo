@@ -34,6 +34,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:network"))
     implementation(project(":core:systemruntime"))
+    implementation(project(":scenarios:pet-grooming"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

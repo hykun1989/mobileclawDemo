@@ -33,7 +33,7 @@ object FamilyShoppingTaskSurface {
                 label = "进行中",
                 detail = "整理待办事项",
                 completed = 1,
-                total = 4,
+                total = 5,
             ),
         )
 
@@ -55,7 +55,7 @@ object FamilyShoppingTaskSurface {
                 label = "进行中",
                 detail = "匹配采购方案",
                 completed = 2,
-                total = 4,
+                total = 5,
             ),
         )
 
@@ -78,7 +78,7 @@ object FamilyShoppingTaskSurface {
                 label = "进行中",
                 detail = "等待清单确认",
                 completed = 3,
-                total = 4,
+                total = 5,
             ),
         )
 
@@ -100,7 +100,33 @@ object FamilyShoppingTaskSurface {
                 label = "进行中",
                 detail = "清单已收敛",
                 completed = 4,
-                total = 4,
+                total = 5,
+            ),
+        )
+
+    fun orderLocked(messageBody: String): ScenarioTaskUpdate =
+        ScenarioTaskUpdate(
+            taskId = TASK_ID,
+            status = ScenarioSurfaceStatus.DONE,
+            subtitle = "家庭采购已下单",
+            conversations = listOf(
+                ScenarioConversation(
+                    ScenarioSurfaceRole.AGENT,
+                    "家庭采购我已经按 Ella 调整后的清单处理好了：低脂牛奶和常用洗衣液已锁定，预计 14:12 送到。",
+                ),
+            ),
+            logs = listOf(
+                ScenarioLog("收到 Ole 通知：$messageBody"),
+                ScenarioLog("调用服务查询：确认低脂牛奶和常用洗衣液库存。"),
+                ScenarioLog("支付 Ole：96 元。"),
+                ScenarioLog("完成记账：家庭采购 96 元。"),
+            ),
+            participantsToAdd = listOf(OLE),
+            progress = ScenarioProgress(
+                label = "完成",
+                detail = "预计 14:12 送达",
+                completed = 5,
+                total = 5,
             ),
         )
 

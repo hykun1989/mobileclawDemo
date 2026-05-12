@@ -61,22 +61,46 @@ object ColdchainDeliveryTaskSurface {
     fun propertyHelp(messageBody: String): ScenarioTaskUpdate =
         ScenarioTaskUpdate(
             taskId = TASK_ID,
-            status = ScenarioSurfaceStatus.DONE,
-            subtitle = "物业已协助保管",
+            status = ScenarioSurfaceStatus.RUNNING,
+            subtitle = "物业可协助保管",
             conversations = listOf(
                 ScenarioConversation(
                     ScenarioSurfaceRole.AGENT,
-                    "物业可以先把冷链包裹放进前台冰柜，这条线我已经处理好了。",
+                    "物业可以先帮忙把冷链包裹放进前台冰柜，我会继续等确认消息。",
                 ),
             ),
             logs = listOf(
                 ScenarioLog("收到物业管家的短信：$messageBody"),
-                ScenarioLog("更新状态：冷链包裹由物业前台冰柜保管。"),
+                ScenarioLog("发送短信给物业管家：麻烦先放进前台冰柜，我稍后去取。"),
+            ),
+            participantsToAdd = listOf(PROPERTY),
+            progress = ScenarioProgress(
+                label = "进行中",
+                detail = "等待物业确认",
+                completed = 2,
+                total = 3,
+            ),
+        )
+
+    fun propertyConfirmed(messageBody: String): ScenarioTaskUpdate =
+        ScenarioTaskUpdate(
+            taskId = TASK_ID,
+            status = ScenarioSurfaceStatus.DONE,
+            subtitle = "物业已放入冰柜",
+            conversations = listOf(
+                ScenarioConversation(
+                    ScenarioSurfaceRole.AGENT,
+                    "物业已经把冷链包裹放进前台冰柜，并发来了取件码。这条线我先标记完成。",
+                ),
+            ),
+            logs = listOf(
+                ScenarioLog("收到物业管家的短信：$messageBody"),
+                ScenarioLog("更新状态：冷链包裹已进入前台冰柜，取件码已记录。"),
             ),
             participantsToAdd = listOf(PROPERTY),
             progress = ScenarioProgress(
                 label = "完成",
-                detail = "物业已协助保管",
+                detail = "前台冰柜已保管",
                 completed = 3,
                 total = 3,
             ),

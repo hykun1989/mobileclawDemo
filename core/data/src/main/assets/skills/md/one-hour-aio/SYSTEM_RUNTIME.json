@@ -146,6 +146,15 @@
     },
     {
       "scenarioId": "one_hour_aio",
+      "id": "property-coldchain-secured",
+      "time": "13:52",
+      "type": "incoming_sms",
+      "source": "物业管家",
+      "title": "物业已保管",
+      "body": "冷链包裹已经放进前台冰柜，取件码 0317，18:00 前取走即可。"
+    },
+    {
+      "scenarioId": "one_hour_aio",
       "id": "petsmart-service-progress",
       "time": "13:54",
       "type": "incoming_sms",
@@ -161,6 +170,24 @@
       "source": "美团买药",
       "title": "健康补给候选",
       "body": "益生菌和维生素 D 可一起配送，预计 14:35 到。"
+    },
+    {
+      "scenarioId": "one_hour_aio",
+      "id": "market-order-locked",
+      "time": "13:58",
+      "type": "notification",
+      "source": "Ole",
+      "title": "家庭采购已锁定",
+      "body": "低脂牛奶和常用洗衣液已锁定库存，预计 14:12 送达。"
+    },
+    {
+      "scenarioId": "one_hour_aio",
+      "id": "health-supply-held",
+      "time": "14:00",
+      "type": "notification",
+      "source": "美团买药",
+      "title": "健康补给保留",
+      "body": "益生菌和维生素 D 的配送档期已保留 20 分钟，仍可 14:35 送达。"
     }
   ]
 }

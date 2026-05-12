@@ -33,7 +33,7 @@ object HealthSupplyTaskSurface {
                 label = "进行中",
                 detail = "等待是否合并配送",
                 completed = 1,
-                total = 3,
+                total = 4,
             ),
         )
 
@@ -55,7 +55,29 @@ object HealthSupplyTaskSurface {
                 label = "等待",
                 detail = "低优先级，稍后再问",
                 completed = 2,
-                total = 3,
+                total = 4,
+            ),
+        )
+
+    fun deliveryHeld(messageBody: String): ScenarioTaskUpdate =
+        ScenarioTaskUpdate(
+            taskId = TASK_ID,
+            subtitle = "配送档期已暂存",
+            conversations = listOf(
+                ScenarioConversation(
+                    ScenarioSurfaceRole.AGENT,
+                    "健康补给的配送档期还能保留 20 分钟，我先记着，不在这时候打断你。",
+                ),
+            ),
+            logs = listOf(
+                ScenarioLog("收到美团买药通知：$messageBody"),
+                ScenarioLog("暂存健康补给候选：益生菌、维生素 D，14:35 可送达。"),
+            ),
+            progress = ScenarioProgress(
+                label = "等待",
+                detail = "稍后再确认",
+                completed = 3,
+                total = 4,
             ),
         )
 

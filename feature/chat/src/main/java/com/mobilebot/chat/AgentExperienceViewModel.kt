@@ -15,6 +15,7 @@ import com.mobilebot.domain.agent.AgentDecisionIntent
 import com.mobilebot.domain.agent.AgentDecisionIntentNormalizer
 import com.mobilebot.domain.interaction.ActionPromptCodec
 import com.mobilebot.domain.todo.TodoListCodec
+import com.mobilebot.scenarios.petgrooming.PetGroomingConversationRules
 import com.mobilebot.scenarios.petgrooming.PetGroomingDecisionIntents
 import com.mobilebot.scenarios.petgrooming.PetGroomingScenarioSpec
 import com.mobilebot.systemruntime.CallEndedEvent
@@ -2665,7 +2666,7 @@ class AgentExperienceViewModel
             val explicit =
                 try {
                     ActionPromptCodec.parseJson(json).map {
-                        ActionButton(label = compactScenarioActionLabel(it.label, it.value), value = it.value)
+                        ActionButton(label = compactActionLabel(it.label, it.value), value = it.value)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to parse action buttons", e)
@@ -2675,7 +2676,7 @@ class AgentExperienceViewModel
             val scenarioActions = inferScenarioActions(promptText)
             if (scenarioActions.isNotEmpty()) return scenarioActions
             val inferred = ActionPromptCodec.resolveOptions(promptText).map {
-                ActionButton(label = compactScenarioActionLabel(it.label, it.value), value = it.value)
+                ActionButton(label = compactActionLabel(it.label, it.value), value = it.value)
             }
             return inferred.ifEmpty {
                 listOf(
@@ -2689,133 +2690,22 @@ class AgentExperienceViewModel
 
         private fun inferScenarioActions(promptText: String): List<ActionButton> {
             if (scenario.scenarioId != "pet-grooming") return emptyList()
-            val lower = promptText.lowercase()
-            if (isAfternoonBathOnlyTradeoff(promptText)) {
-                return listOf(
-                    ActionButton("约下午5点", "USER_INTENT:pet_grooming.book_afternoon_bath_only"),
-                    ActionButton("约9点", "USER_INTENT:pet_grooming.book_0900"),
-                    ActionButton("换一家", "USER_INTENT:pet_grooming.find_alternative_shop"),
-                )
-            }
-            if (isGroomingTimeTradeoff(promptText)) {
-                return listOf(
-                    ActionButton("约9点", "USER_INTENT:pet_grooming.book_0900"),
-                    ActionButton("问下午", "USER_INTENT:pet_grooming.ask_afternoon"),
-                    ActionButton("换一家", "USER_INTENT:pet_grooming.find_alternative_shop"),
-                )
-            }
-            val asksToKeepGrooming =
-                (lower.contains("grooming") || promptText.contains("美容") || promptText.contains("洗澡") || promptText.contains("洗护")) &&
-                    (lower.contains("appointment") || lower.contains("sunday") || lower.contains("周日")) &&
-                    (
-                        lower.contains("regular") ||
-                            lower.contains("weekly") ||
-                            lower.contains("keep kylin") ||
-                            lower.contains("proceed") ||
-                            lower.contains("defer") ||
-                            promptText.contains("按计划") ||
-                            promptText.contains("请选择") ||
-                            promptText.contains("继续吗") ||
-                            lower.contains("照常") ||
-                            lower.contains("改天")
-                    )
-            if (!asksToKeepGrooming) return emptyList()
-            return listOf(
-                ActionButton("好的", "好的"),
-                ActionButton("改天再说", "改天再说"),
-            )
-        }
-
-        private fun isGroomingTimeTradeoff(text: String): Boolean {
-            val lower = text.lowercase()
-            val hasPetSmart = lower.contains("petsmart") || text.contains("宠物店")
-            val hasMorning = lower.contains("9:00") || lower.contains("9am") || text.contains("上午九点") || text.contains("上午9点")
-            val hasAfternoon = lower.contains("afternoon") || lower.contains("5 pm") || lower.contains("17:00") ||
-                text.contains("下午") || text.contains("五点") || text.contains("5点")
-            val asksChoice = lower.contains("would you like") || lower.contains("which option") ||
-                lower.contains("tradeoff") || text.contains("要约") || text.contains("选择")
-            return hasPetSmart && hasMorning && hasAfternoon && asksChoice
-        }
-
-        private fun isAfternoonBathOnlyTradeoff(text: String): Boolean {
-            val lower = text.lowercase()
-            val hasPetSmart = lower.contains("petsmart") || text.contains("宠物店")
-            val hasAfternoon = lower.contains("afternoon") || lower.contains("17:00") || lower.contains("5 pm") ||
-                text.contains("下午") || text.contains("五点") || text.contains("5点")
-            val hasBathOnly = lower.contains("bath-only") || lower.contains("bath only") ||
-                text.contains("只洗澡") || text.contains("不能除毛") || text.contains("不含除毛")
-            return hasPetSmart && hasAfternoon && hasBathOnly
+            return PetGroomingConversationRules.actionCandidates(promptText)
+                .map { ActionButton(label = it.label, value = it.value) }
         }
 
         private fun shouldSuppressResolvedGroomingPrompt(text: String): Boolean {
             if (scenario.scenarioId != "pet-grooming") return false
-            val resolvedInitialTradeoff =
-                latestAgentDecisionIntent in setOf(
-                    PetGroomingDecisionIntents.BookNine,
-                    PetGroomingDecisionIntents.AskAfternoon,
-                    PetGroomingDecisionIntents.BookAfternoonBathOnly,
-                    PetGroomingDecisionIntents.FindAlternative,
-                )
-            val resolvedAfternoonTradeoff =
-                latestAgentDecisionIntent in setOf(
-                    PetGroomingDecisionIntents.BookNine,
-                    PetGroomingDecisionIntents.BookAfternoonBathOnly,
-                    PetGroomingDecisionIntents.FindAlternative,
-                )
-            return when {
-                isAfternoonBathOnlyTradeoff(text) -> resolvedAfternoonTradeoff
-                isGroomingTimeTradeoff(text) -> resolvedInitialTradeoff
-                else -> false
-            }
+            return PetGroomingConversationRules.shouldSuppressResolvedPrompt(text, latestAgentDecisionIntent)
         }
 
-        private fun compactScenarioActionLabel(
+        private fun compactActionLabel(
             label: String,
             value: String,
         ): String {
             if (scenario.scenarioId != "pet-grooming") return label
-            val combined = "$label $value"
-            val lower = combined.lowercase()
-            val timeLabel = Regex("""\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b""", RegexOption.IGNORE_CASE)
-                .find(combined)
-                ?.value
-                ?.replace(Regex("""\s+"""), " ")
-                ?.trim()
-            return when {
-                combined.contains("好的") ->
-                    "好的"
-                lower.contains("defer") || lower.contains("later") || lower.contains("next week") || combined.contains("改天") ->
-                    "改天再说"
-                lower.contains("book_afternoon_bath_only") || combined.contains("下午5点") || combined.contains("下午五点") ->
-                    "约下午5点"
-                lower.contains("book_0900") ->
-                    "约9点"
-                lower.contains("book") || lower.contains("booking") || lower.contains("appointment") ->
-                    timeLabel?.let { "约${normalizeTimeLabel(it)}" } ?: "预约"
-                lower.contains("modify") || lower.contains("change") || combined.contains("修改") ->
-                    "修改计划"
-                lower.contains("afternoon") || combined.contains("下午") ->
-                    "问下午"
-                lower.contains("another shop") || lower.contains("other shop") || combined.contains("换一家") ->
-                    "换一家"
-                lower.contains("cancel") || combined.contains("取消") ->
-                    "取消"
-                else -> label.substringBefore("（")
-                    .substringBefore("(")
-                    .substringBefore("->")
-                    .substringBefore("=>")
-                    .substringBefore("→")
-                    .trim()
-                    .ifBlank { label }
-            }.let { it.take(24).trim() }
+            return PetGroomingConversationRules.compactActionLabel(label, value)
         }
-
-        private fun normalizeTimeLabel(value: String): String =
-            value
-                .replace(Regex(""":00\b"""), "点")
-                .replace(Regex("""\s*(am|AM)\b"""), "")
-                .replace(Regex("""\s*(pm|PM)\b"""), "")
-                .trim()
 
         private fun inferDecisionPrompt(content: String): DecisionPrompt? {
             val text = content.trim()
@@ -2829,14 +2719,8 @@ class AgentExperienceViewModel
         }
 
         private fun compactDecisionPromptText(text: String): String {
-            if (scenario.scenarioId == "pet-grooming" && isAfternoonBathOnlyTradeoff(text)) {
-                return "PetSmart说下午5点后可以，只够洗澡，不含除毛。要改约下午5点吗？"
-            }
-            if (scenario.scenarioId == "pet-grooming" && isGroomingTimeTradeoff(text)) {
-                return "PetSmart说明天上午9点可以洗澡和除毛，下午5点后只够洗澡。要约9点吗？"
-            }
-            if (scenario.scenarioId == "pet-grooming" && inferScenarioActions(text).isNotEmpty()) {
-                return "明天周日了，还是照常给麒麟约洗澡么？"
+            if (scenario.scenarioId == "pet-grooming") {
+                return PetGroomingConversationRules.compactDecisionPromptText(text) ?: text
             }
             return text
         }
@@ -2877,18 +2761,9 @@ class AgentExperienceViewModel
                 .toList()
 
         private fun compactInlineActionLabel(value: String): String {
-            if (scenario.scenarioId == "pet-grooming" && isNonActionGroomingFact(value)) return ""
+            if (scenario.scenarioId == "pet-grooming" && PetGroomingConversationRules.isNonActionFact(value)) return ""
             val timeRange = Regex("""^\d{1,2}:\d{2}\s*[–-]\s*\d{1,2}:\d{2}""").find(value)?.value
             return timeRange ?: value
-        }
-
-        private fun isNonActionGroomingFact(value: String): Boolean {
-            val lower = value.lowercase()
-            return lower.contains("booking secured") ||
-                lower.contains("medium dog") ||
-                lower.contains("basic bath") ||
-                lower.contains("de-shedding care") ||
-                lower.contains("time changed")
         }
 
         private fun stripLeadingActionIcon(value: String): String =

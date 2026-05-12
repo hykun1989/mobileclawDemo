@@ -811,7 +811,7 @@ class AgentExperienceViewModel
                                 val silentProgress =
                                     scenario.scenarioId == "pet-grooming" &&
                                     displayText == null &&
-                                    isTransientGroomingNarration(content)
+                                    PetGroomingConversationRules.isTransientNarration(content)
                                 val visibleBase = base.withPendingSelectedAction()
                                 visibleBase.copy(
                                     finalSummary = displayText ?: content,
@@ -853,7 +853,7 @@ class AgentExperienceViewModel
         private fun visibleAssistantUpdate(content: String): String? {
             if (content.isBlank() || content.length > MAX_VISIBLE_ASSISTANT_UPDATE_CHARS) return null
             val lower = content.lowercase()
-            if (scenario.scenarioId == "pet-grooming" && isTransientGroomingNarration(content)) return null
+            if (scenario.scenarioId == "pet-grooming" && PetGroomingConversationRules.isTransientNarration(content)) return null
             if (
                 lower.contains("system_wait_for_sms") ||
                 lower.contains("device_system") ||
@@ -891,13 +891,15 @@ class AgentExperienceViewModel
             val lower = content.lowercase()
             return when {
                 scenario.scenarioId == "pet-grooming" &&
-                    isTransientGroomingNarration(content) -> null
+                    PetGroomingConversationRules.isTransientNarration(content) -> null
                 scenario.scenarioId == "pet-grooming" &&
                     isRoutineReminderQuestion(content) -> null
                 scenario.scenarioId == "pet-grooming" &&
                     lower.contains("petsmart") &&
                     content.contains("最终价格") -> "已向 PetSmart 发送短信，确认周日可选时段和服务内容。"
-                groomingCompletionText(lower) -> compactGroomingCompletionText(content)
+                scenario.scenarioId == "pet-grooming" &&
+                    PetGroomingConversationRules.isCompletionText(content) ->
+                    PetGroomingConversationRules.compactCompletionText(content, lastGroomingPaymentAmount)
                 (
                     lower.contains("deferred") ||
                         lower.contains("skip this week") ||
@@ -912,42 +914,6 @@ class AgentExperienceViewModel
             }
         }
 
-        private fun isTransientGroomingNarration(text: String): Boolean =
-            text.contains("正在发送") ||
-                text.contains("正在等待") ||
-                text.contains("等待 PetSmart 回复") ||
-                text.contains("稍后将等待") ||
-                text.contains("稍后将自动处理") ||
-                text.contains("已向 PetSmart 发送") ||
-                text.contains("已向 Harbor Paws Salon 发送") ||
-                text.contains("接下来将等待") ||
-                text.contains("之后立即联系司机") ||
-                text.contains("发送预约咨询短信") ||
-                text.contains("详细信息已加载") ||
-                (text.contains("Driver 已识别") && text.contains("PetSmart")) ||
-                (text.contains("已确认：") && text.contains("PetSmart")) ||
-                text.contains("现在向 PetSmart 发送短信") ||
-                text.contains("是否现在就联系司机") ||
-                text.contains("接下来将联系您的私人司机") ||
-                text.contains("已向司机发送指令") ||
-                text.contains("等待司机回复确认") ||
-                text.contains("正在监听司机") ||
-                text.contains("pickup 计划") ||
-                text.contains("已启动监听") ||
-                text.contains("仍在监听") ||
-                text.contains("当前状态为") ||
-                text.contains("按流程优先级") ||
-                text.contains("首个缺失") ||
-                text.contains("实际属于") ||
-                text.contains("下一步：") ||
-                text.contains("4:45前送达") ||
-                (
-                    text.contains("预约已确认") &&
-                        text.contains("接下来") &&
-                        text.contains("司机") &&
-                        text.contains("PetSmart")
-                )
-
         private fun offersDeferralAsOption(text: String): Boolean =
             text.contains("`改天再说`") ||
                 text.lineSequence().any { line ->
@@ -956,48 +922,16 @@ class AgentExperienceViewModel
                         trimmed.contains("改天")
                 }
 
-        private fun groomingCompletionText(text: String): Boolean =
-            !text.contains("pending") &&
-                !text.contains("home confirmation pending") &&
-                !text.contains("到家确认待") &&
-                !text.contains("等待司机确认") &&
-                (
-                    text.contains("all steps complete") ||
-                        text.contains("paid and accounted") ||
-                        text.contains("payment completed") ||
-                        text.contains("closed loop") ||
-                        text.contains("流程闭环") ||
-                        text.contains("全流程已完成") ||
-                        text.contains("全流程完成") ||
-                        text.contains("全流程顺利完成") ||
-                        text.contains("全部完成") ||
-                        (text.contains("支付") && (text.contains("记账") || text.contains("账务") || text.contains("支付与记账") || text.contains("支付及记账") || text.contains("费用已记入") || text.contains("已记入")))
-                ) &&
-                (text.contains("到家") || text.contains("安全到家") || text.contains("回家") || text.contains("已接回") || text.contains("接回") || text.contains("home")) &&
-                (text.contains("kylin") || text.contains("麒麟"))
-
         private fun isRoutineReminderQuestion(text: String): Boolean {
-            val lower = text.lowercase()
             return scenario.scenarioId == "pet-grooming" &&
-                (text.contains("需要我") || lower.contains("do you want me")) &&
-                (text.contains("提醒") || lower.contains("reminder")) &&
-                !looksLikeDecisionRequest(text)
-        }
-
-        private fun compactGroomingCompletionText(text: String): String {
-            val amount = lastGroomingPaymentAmount
-                ?: Regex("""(?:¥|￥)\s?\d+(?:\.\d+)?|(?:cny|rmb|yuan)\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:yuan|rmb|cny|元)""", RegexOption.IGNORE_CASE)
-                    .find(text)
-                    ?.value
-                    ?.replace(Regex("""\s+"""), "")
-                    ?.let(::normalizeAmountText)
-            val feeText = amount?.let { "洗护费用 $it" } ?: "洗护费用"
-            return "麒麟已到家，$feeText 已支付并完成记账。"
+                PetGroomingConversationRules.isRoutineReminderQuestion(
+                    text = text,
+                    looksLikeDecisionRequest = looksLikeDecisionRequest(text),
+                )
         }
 
         private fun normalizeAmountText(value: String): String {
-            val number = Regex("""\d+(?:\.\d+)?""").find(value)?.value ?: return value
-            return "${number}元"
+            return PetGroomingConversationRules.normalizeAmountText(value)
         }
 
         private fun containsChinese(text: String): Boolean =

@@ -18,6 +18,8 @@ import com.mobilebot.domain.todo.TodoListCodec
 import com.mobilebot.scenarios.petgrooming.PetGroomingContacts
 import com.mobilebot.scenarios.petgrooming.PetGroomingConversationRules
 import com.mobilebot.scenarios.petgrooming.PetGroomingDecisionIntents
+import com.mobilebot.scenarios.petgrooming.PetGroomingMilestone
+import com.mobilebot.scenarios.petgrooming.PetGroomingMilestoneDetector
 import com.mobilebot.scenarios.petgrooming.PetGroomingScenarioSpec
 import com.mobilebot.systemruntime.CallEndedEvent
 import com.mobilebot.systemruntime.IncomingCallEvent
@@ -74,7 +76,7 @@ class AgentExperienceViewModel
         private val deliveredTimelineEvents = mutableSetOf<String>()
         private val taskStates = linkedMapOf<String, AgentTaskState>()
         private val pinnedTaskIds = linkedSetOf<String>()
-        private val groomingMilestones = mutableSetOf<GroomingMilestone>()
+        private val groomingMilestones = mutableSetOf<PetGroomingMilestone>()
         private val endedCallNotificationIds = mutableSetOf<String>()
         // 系统事件只负责投放外部事实，具体任务编排由 Agent 处理。
         private val timelineScript: List<ScenarioTimelineEvent> by lazy {
@@ -592,9 +594,9 @@ class AgentExperienceViewModel
             if (frame.scenario.scenarioId != "pet-grooming") return false
             return groomingMilestones.containsAll(
                 setOf(
-                    GroomingMilestone.HOME_CONFIRMED,
-                    GroomingMilestone.PAYMENT_COMPLETED,
-                    GroomingMilestone.EXPENSE_RECORDED,
+                    PetGroomingMilestone.HOME_CONFIRMED,
+                    PetGroomingMilestone.PAYMENT_COMPLETED,
+                    PetGroomingMilestone.EXPENSE_RECORDED,
                 ),
             )
         }
@@ -2526,30 +2528,9 @@ class AgentExperienceViewModel
             if (scenario.scenarioId != "pet-grooming") return
             if (!isSystemRuntimeTool(tool)) return
             val data = parseToolData(content) ?: return
-            val smsEventType = data.optJSONObject("sms")?.optString("eventType").orEmpty()
-            when (smsEventType) {
-                "driver_home_arrival" -> groomingMilestones += GroomingMilestone.HOME_CONFIRMED
-            }
-
-            val paymentStatus = data.optJSONObject("payment")?.optString("status").orEmpty()
-            if (paymentStatus == "completed") {
-                groomingMilestones += GroomingMilestone.PAYMENT_COMPLETED
-                lastGroomingPaymentAmount = data.optJSONObject("payment")
-                    ?.optString("amount")
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let(::normalizeAmountText)
-                    ?: lastGroomingPaymentAmount
-            }
-
-            val expenseStatus = data.optJSONObject("expense")?.optString("status").orEmpty()
-            if (expenseStatus == "recorded") {
-                groomingMilestones += GroomingMilestone.EXPENSE_RECORDED
-                lastGroomingPaymentAmount = data.optJSONObject("expense")
-                    ?.optString("amount")
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let(::normalizeAmountText)
-                    ?: lastGroomingPaymentAmount
-            }
+            val update = PetGroomingMilestoneDetector.fromSystemRuntimeData(data)
+            groomingMilestones += update.milestones
+            lastGroomingPaymentAmount = update.paymentAmount ?: lastGroomingPaymentAmount
         }
 
         private fun parseActionButtons(json: String?, promptText: String): List<ActionButton> {
@@ -2722,12 +2703,6 @@ class AgentExperienceViewModel
         private fun nextId(prefix: String): String {
             eventCounter += 1
             return "$prefix-$eventCounter"
-        }
-
-        private enum class GroomingMilestone {
-            HOME_CONFIRMED,
-            PAYMENT_COMPLETED,
-            EXPENSE_RECORDED,
         }
 
         private companion object {

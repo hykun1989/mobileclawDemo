@@ -248,10 +248,12 @@ class AgentExperienceViewModel
         }
 
         private fun currentSessionRoute(): AgentSessionRoute =
-            AgentSessionRoute(
-                sessionId = currentChatId,
-                taskId = _frame.value.activeTaskId,
-            )
+            _frame.value.activeTaskId.let { activeTaskId ->
+                AgentSessionRoute(
+                    sessionId = currentChatId ?: activeTaskId,
+                    taskId = activeTaskId,
+                )
+            }
 
         fun selectTask(taskId: String) {
             val task = taskStates[taskId] ?: return

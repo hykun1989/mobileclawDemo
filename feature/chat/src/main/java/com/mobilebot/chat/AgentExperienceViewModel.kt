@@ -1095,6 +1095,16 @@ class AgentExperienceViewModel
             }
         }
 
+        fun expireSystemNotification(notificationId: String) {
+            _frame.update { frame ->
+                if (frame.systemNotification?.id == notificationId) {
+                    frame.copy(systemNotification = null)
+                } else {
+                    frame
+                }
+            }
+        }
+
         private fun toolStartEvent(tool: String): AgentTimelineEvent {
             val (title, detail) = when (tool) {
                 "use_skill" -> "流程已选择" to "加载麒麟洗护协调规则。"

@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
@@ -104,6 +105,13 @@ fun AgentExperienceScreen(
             blueprintOpen = true
             autoOpenedTaskIds = autoOpenedTaskIds + taskId
         }
+    }
+
+    LaunchedEffect(frame.systemNotification?.id) {
+        val notificationId = frame.systemNotification?.id ?: return@LaunchedEffect
+        // 提醒层无人处理时只关闭浮层，不触发按钮动作。
+        delay(SYSTEM_NOTIFICATION_AUTO_DISMISS_MS)
+        viewModel.expireSystemNotification(notificationId)
     }
 
     ModalNavigationDrawer(
@@ -1698,3 +1706,4 @@ private val AgentPanelActive = Color(0xFF2A2A2A)
 private val BlueprintGray = Color(0xFF545454)
 private val AgentMuted = Color(0xFFA8A8A8)
 private val AgentWhite = Color.White
+private const val SYSTEM_NOTIFICATION_AUTO_DISMISS_MS = 20_000L

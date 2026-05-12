@@ -15,6 +15,7 @@ import com.mobilebot.domain.agent.AgentDecisionIntent
 import com.mobilebot.domain.agent.AgentDecisionIntentNormalizer
 import com.mobilebot.domain.interaction.ActionPromptCodec
 import com.mobilebot.domain.todo.TodoListCodec
+import com.mobilebot.scenarios.petgrooming.PetGroomingContacts
 import com.mobilebot.scenarios.petgrooming.PetGroomingConversationRules
 import com.mobilebot.scenarios.petgrooming.PetGroomingDecisionIntents
 import com.mobilebot.scenarios.petgrooming.PetGroomingScenarioSpec
@@ -1436,7 +1437,7 @@ class AgentExperienceViewModel
             }
             val party = when {
                 contact.equals("Driver", ignoreCase = true) -> "Driver"
-                isGroomingShopContact(contact) -> groomingShopNameIn(contact) ?: contact
+                PetGroomingContacts.isGroomingShopContact(contact) -> PetGroomingContacts.shopNameIn(contact) ?: contact
                 else -> return emptyList()
             }
             if (existing.any { it.text.contains("添加") && it.text.contains(party) && it.text.contains("参与方") }) {
@@ -1487,55 +1488,10 @@ class AgentExperienceViewModel
         }
 
         private fun selectedGroomingShopName(): String =
-            if (selectedAppointmentIsAlternative()) "Harbor Paws Salon" else "PetSmart"
-
-        private fun isGroomingShopContact(contact: String): Boolean =
-            groomingShopNameIn(contact) != null ||
-                contact.contains("pet", ignoreCase = true) ||
-                contact.contains("salon", ignoreCase = true) ||
-                contact.contains("groom", ignoreCase = true) ||
-                contact.contains("宠物") ||
-                contact.contains("洗护") ||
-                contact.contains("洗澡")
-
-        private fun groomingShopNameIn(text: String): String? =
-            when {
-                text.contains("Harbor Paws", ignoreCase = true) ||
-                    text.contains("harbor-paws-salon", ignoreCase = true) ||
-                    text.contains("+86-756-888-1111") ||
-                    text.contains("756-888-1111") -> "Harbor Paws Salon"
-                text.contains("PetSmart", ignoreCase = true) ||
-                    text.contains("Pet Smart", ignoreCase = true) ||
-                    text.contains("+86-756-888-0001") ||
-                    text.contains("756-888-0001") -> "PetSmart"
-                else -> null
-            }
+            PetGroomingContacts.selectedShopName(useAlternative = selectedAppointmentIsAlternative())
 
         private fun displayReminderBody(raw: String): String {
-            val shopName = groomingShopNameIn(raw) ?: return raw
-            if (!raw.contains("司机") && !raw.contains("Driver")) return raw
-
-            val normalized = raw
-                .replace("5:00前送达 PetSmart", "17:00前送达 PetSmart")
-                .replace("5:00前送到 PetSmart", "17:00前送达 PetSmart")
-
-            return when {
-                normalized.contains("13:30") ||
-                    normalized.contains("14:00") ||
-                    normalized.contains("下午2") ||
-                    normalized.contains("下午两点") ->
-                    "13:30 Driver 到家接 Kylin，14:00前送达 $shopName。"
-                normalized.contains("16:30") ||
-                    normalized.contains("17:00") ->
-                    "16:30 Driver 到家接 Kylin，17:00前送达 $shopName。"
-                normalized.contains("8:30") ||
-                    normalized.contains("08:30") ||
-                    normalized.contains("9:00") ||
-                    normalized.contains("09:00") ||
-                    normalized.contains("9点") ->
-                    "08:30 Driver 到家接 Kylin，09:00前送达 $shopName。"
-                else -> normalized
-            }
+            return PetGroomingContacts.displayDriverReminderBody(raw)
         }
 
         private fun AgentExperienceFrame.withScenarioEventClock(

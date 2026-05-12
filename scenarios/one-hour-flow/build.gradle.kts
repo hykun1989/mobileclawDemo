@@ -22,6 +22,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:domain"))
     implementation(project(":core:systemruntime"))
     implementation(project(":scenarios:runtime"))
     implementation(project(":scenarios:pet-grooming"))

@@ -27,7 +27,7 @@ class QueryServiceTool
               "type": "object",
               "properties": {
                 "endpoint": {"type": "string", "description": "MCP or service endpoint URL from the active skill."},
-                "serviceId": {"type": "string", "description": "Service id from the skill, such as pet_salon_search or grocery_search."},
+                "serviceId": {"type": "string", "description": "Service id declared by the active skill."},
                 "action": {"type": "string", "description": "Tool/action name to call on the service."},
                 "arguments": {"type": "object", "description": "Action arguments."}
               },

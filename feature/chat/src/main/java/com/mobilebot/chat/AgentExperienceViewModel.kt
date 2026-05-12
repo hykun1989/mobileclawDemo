@@ -50,7 +50,6 @@ import org.json.JSONObject
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.format.TextStyle
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
@@ -606,9 +605,17 @@ class AgentExperienceViewModel
         private fun AgentExperienceFrame.withClock(clock: LocalDateTime): AgentExperienceFrame =
             copy(
                 clockTimeText = clock.toLocalTime().format(CLOCK_TIME_FORMATTER),
-                clockDateText = "${clock.toLocalDate().format(CLOCK_DATE_FORMATTER)} ${clock.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US)}",
+                clockDateText = "${clock.toLocalDate().format(CLOCK_DATE_FORMATTER)} ${scenarioDayLabel(clock)}",
                 clockMode = clockMode,
             )
+
+        private fun scenarioDayLabel(clock: LocalDateTime): String {
+            val offset = Duration.between(
+                INITIAL_SCENARIO_CLOCK.toLocalDate().atStartOfDay(),
+                clock.toLocalDate().atStartOfDay(),
+            ).toDays()
+            return SCENARIO_DAY_LABELS[Math.floorMod(offset, SCENARIO_DAY_LABELS.size.toLong()).toInt()]
+        }
 
         private fun scenarioClosureSatisfied(frame: AgentExperienceFrame): Boolean {
             if (!OneHourScenarioPolicy.matches(frame.scenario.scenarioId)) return false
@@ -2093,6 +2100,7 @@ class AgentExperienceViewModel
             private const val SCRIPTED_ACTION_PREFIX = "MULTI:"
             private const val ONE_HOUR_SCENARIO_ID = "one_hour_aio"
             private val INITIAL_SCENARIO_CLOCK: LocalDateTime = LocalDateTime.of(2027, 4, 25, 13, 0)
+            private val SCENARIO_DAY_LABELS = listOf("Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri")
             private val CLOCK_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
             private val CLOCK_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.US)
             private val BLUEPRINT_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MM/dd HH:mm", Locale.US)

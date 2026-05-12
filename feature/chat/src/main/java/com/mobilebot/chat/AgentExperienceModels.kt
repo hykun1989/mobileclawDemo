@@ -140,7 +140,7 @@ data class AgentExperienceFrame(
     val scenario: AgentScenarioConfig,
     val statusLabel: String,
     val clockTimeText: String = "13:00",
-    val clockDateText: String = "04/25/2027 Sun",
+    val clockDateText: String = "04/25/2027 Sat",
     val clockMode: ScenarioClockMode = ScenarioClockMode.Live,
     val busy: Boolean = false,
     val hasStarted: Boolean = false,

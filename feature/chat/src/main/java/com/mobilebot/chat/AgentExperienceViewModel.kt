@@ -15,6 +15,13 @@ import com.mobilebot.domain.agent.AgentDecisionIntent
 import com.mobilebot.domain.agent.AgentDecisionIntentNormalizer
 import com.mobilebot.domain.interaction.ActionPromptCodec
 import com.mobilebot.domain.todo.TodoListCodec
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingSurfaceConversation
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingSurfaceLog
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingSurfaceParticipant
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingSurfaceProgress
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingSurfaceRole
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingSurfaceStatus
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingTaskSurface
 import com.mobilebot.scenarios.petgrooming.PetGroomingContacts
 import com.mobilebot.scenarios.petgrooming.PetGroomingConversationRules
 import com.mobilebot.scenarios.petgrooming.PetGroomingDecisionIntents
@@ -1461,11 +1468,36 @@ class AgentExperienceViewModel
             }
         }
 
+        private fun applyFamilyShoppingTaskUpdate(
+            update: com.mobilebot.scenarios.familyshopping.FamilyShoppingTaskUpdate,
+            timeText: String,
+            activate: Boolean = false,
+        ) {
+            updateTaskState(FamilyShoppingTaskSurface.TASK_ID, activate = activate) { task ->
+                task.copy(
+                    status = update.status.toAgentStatus(),
+                    updatedTimeText = timeText,
+                    subtitle = update.subtitle,
+                    conversationItems = task.conversationItems + update.conversations.map { it.toConversationItem() },
+                    taskLogs = appendTaskLogs(task.taskLogs, update.logs.toFamilyTaskLogs(timeText)),
+                    participants = update.participants?.map { it.toAgentParticipant() } ?: task.participants,
+                    progressLine = update.progress.toProgressLine(),
+                )
+            }
+        }
+
         private fun PetGroomingSurfaceStatus.toAgentStatus(): AgentTimelineStatus =
             when (this) {
                 PetGroomingSurfaceStatus.RUNNING -> AgentTimelineStatus.RUNNING
                 PetGroomingSurfaceStatus.DONE -> AgentTimelineStatus.DONE
                 PetGroomingSurfaceStatus.BLOCKED -> AgentTimelineStatus.BLOCKED
+            }
+
+        private fun FamilyShoppingSurfaceStatus.toAgentStatus(): AgentTimelineStatus =
+            when (this) {
+                FamilyShoppingSurfaceStatus.RUNNING -> AgentTimelineStatus.RUNNING
+                FamilyShoppingSurfaceStatus.DONE -> AgentTimelineStatus.DONE
+                FamilyShoppingSurfaceStatus.BLOCKED -> AgentTimelineStatus.BLOCKED
             }
 
         private fun PetGroomingSurfaceConversation.toConversationItem(): AgentConversationItem =
@@ -1478,7 +1510,26 @@ class AgentExperienceViewModel
                 text = text,
             )
 
+        private fun FamilyShoppingSurfaceConversation.toConversationItem(): AgentConversationItem =
+            AgentConversationItem(
+                id = nextId("conversation"),
+                role = when (role) {
+                    FamilyShoppingSurfaceRole.AGENT -> AgentConversationRole.AGENT
+                    FamilyShoppingSurfaceRole.USER -> AgentConversationRole.USER
+                },
+                text = text,
+            )
+
         private fun List<PetGroomingSurfaceLog>.toTaskLogs(timeText: String): List<AgentTaskLog> =
+            map {
+                AgentTaskLog(
+                    id = nextId("task"),
+                    timeText = timeText,
+                    text = it.text,
+                )
+            }
+
+        private fun List<FamilyShoppingSurfaceLog>.toFamilyTaskLogs(timeText: String): List<AgentTaskLog> =
             map {
                 AgentTaskLog(
                     id = nextId("task"),
@@ -1495,7 +1546,23 @@ class AgentExperienceViewModel
                 role = role,
             )
 
+        private fun FamilyShoppingSurfaceParticipant.toAgentParticipant(): AgentParticipant =
+            AgentParticipant(
+                id = id,
+                label = label,
+                displayName = displayName,
+                role = role,
+            )
+
         private fun PetGroomingSurfaceProgress.toProgressLine(): AgentProgressLine =
+            AgentProgressLine(
+                label = label,
+                detail = detail,
+                completed = completed,
+                total = total,
+            )
+
+        private fun FamilyShoppingSurfaceProgress.toProgressLine(): AgentProgressLine =
             AgentProgressLine(
                 label = label,
                 detail = detail,
@@ -1737,38 +1804,10 @@ class AgentExperienceViewModel
         }
 
         private fun handleEllaShoppingFollowup(event: IncomingSmsEvent) {
-            updateTaskState(FAMILY_TASK_ID, activate = false) { task ->
-                task.copy(
-                    updatedTimeText = blueprintTimeText(event.occurredAt),
-                    subtitle = "采购优先级已更新",
-                    conversationItems = appendConversation(
-                        task.conversationItems,
-                        AgentConversationRole.AGENT,
-                        "Ella 又补充了采购优先级：低脂牛奶和洗衣液优先，水果顺路再买。我已经同步到任务里。",
-                    ),
-                    taskLogs = appendTaskLogs(
-                        task.taskLogs,
-                        listOf(
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "收到 Ella 的短信：${event.body}",
-                            ),
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "更新采购优先级：低脂牛奶、洗衣液优先，水果可选。",
-                            ),
-                        ),
-                    ),
-                    progressLine = AgentProgressLine(
-                        label = "进行中",
-                        detail = "匹配采购方案",
-                        completed = 2,
-                        total = 4,
-                    ),
-                )
-            }
+            applyFamilyShoppingTaskUpdate(
+                update = FamilyShoppingTaskSurface.priorityFollowup(event.body),
+                timeText = blueprintTimeText(event.occurredAt),
+            )
         }
 
         private fun handleDriverPickedUpKylin(event: IncomingSmsEvent) {
@@ -1863,41 +1902,10 @@ class AgentExperienceViewModel
         }
 
         private fun handleMarketDeliveryWindow(event: RuntimeNotificationEvent) {
-            updateTaskState(FAMILY_TASK_ID, activate = false) { task ->
-                task.copy(
-                    updatedTimeText = blueprintTimeText(event.occurredAt),
-                    subtitle = "已找到可配送渠道",
-                    conversationItems = appendConversation(
-                        task.conversationItems,
-                        AgentConversationRole.AGENT,
-                        "附近超市有低脂牛奶和常用洗衣液，45 分钟内可送达。我先把它作为家庭采购候选，不打断你。",
-                    ),
-                    taskLogs = appendTaskLogs(
-                        task.taskLogs,
-                        listOf(
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "收到 Ole 通知：${event.body}",
-                            ),
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "加入采购候选：低脂牛奶、常用洗衣液，预计 45 分钟内送达。",
-                            ),
-                        ),
-                    ),
-                    participants = task.participants.withParticipant(
-                        AgentParticipant("ole", "O", "Ole", "market"),
-                    ),
-                    progressLine = AgentProgressLine(
-                        label = "进行中",
-                        detail = "等待清单确认",
-                        completed = 3,
-                        total = 4,
-                    ),
-                )
-            }
+            applyFamilyShoppingTaskUpdate(
+                update = FamilyShoppingTaskSurface.marketDeliveryCandidate(event.body),
+                timeText = blueprintTimeText(event.occurredAt),
+            )
         }
 
         private fun handleCourierColdchainArriving(event: RuntimeNotificationEvent) {
@@ -2025,38 +2033,10 @@ class AgentExperienceViewModel
         }
 
         private fun handleEllaShoppingClarify(event: IncomingSmsEvent) {
-            updateTaskState(FAMILY_TASK_ID, activate = false) { task ->
-                task.copy(
-                    updatedTimeText = blueprintTimeText(event.occurredAt),
-                    subtitle = "采购清单已收敛",
-                    conversationItems = appendConversation(
-                        task.conversationItems,
-                        AgentConversationRole.AGENT,
-                        "Ella 又调整了清单：洗衣液买常用款，猫粮不用买。我已经把候选清单收敛好了。",
-                    ),
-                    taskLogs = appendTaskLogs(
-                        task.taskLogs,
-                        listOf(
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "收到 Ella 的短信：${event.body}",
-                            ),
-                            AgentTaskLog(
-                                id = nextId("task"),
-                                timeText = blueprintTimeText(event.occurredAt),
-                                text = "更新采购清单：保留低脂牛奶、常用洗衣液；移除猫粮。",
-                            ),
-                        ),
-                    ),
-                    progressLine = AgentProgressLine(
-                        label = "进行中",
-                        detail = "清单已收敛",
-                        completed = 4,
-                        total = 4,
-                    ),
-                )
-            }
+            applyFamilyShoppingTaskUpdate(
+                update = FamilyShoppingTaskSurface.clarifiedList(event.body),
+                timeText = blueprintTimeText(event.occurredAt),
+            )
         }
 
         private fun handlePetSmartServiceProgress(event: IncomingSmsEvent) {
@@ -2119,40 +2099,17 @@ class AgentExperienceViewModel
         private fun handleCallEndedEvent(event: CallEndedEvent) {
             endedCallNotificationIds += event.id.removeSuffix("-ended")
             endedCallNotificationIds += event.id
+            val seed = FamilyShoppingTaskSurface.fromEllaCall()
             val task = AgentTaskState(
-                id = FAMILY_TASK_ID,
-                title = "家庭采购",
-                subtitle = "Ella 电话交代的待办",
-                status = AgentTimelineStatus.RUNNING,
+                id = FamilyShoppingTaskSurface.TASK_ID,
+                title = seed.title,
+                subtitle = seed.subtitle,
+                status = seed.status.toAgentStatus(),
                 updatedTimeText = blueprintTimeText(scenarioClock),
-                conversationItems = listOf(
-                    AgentConversationItem(
-                        id = nextId("conversation"),
-                        role = AgentConversationRole.AGENT,
-                        text = "刚才 Ella 电话里提到周末家庭采购，我已经帮你建立任务跟踪，会继续整理需要确认的事项。",
-                    ),
-                ),
-                taskLogs = listOf(
-                    AgentTaskLog(
-                        id = nextId("task"),
-                        timeText = blueprintTimeText(scenarioClock),
-                        text = "通话转写完成：识别到 Ella 交代的家庭采购待办。",
-                    ),
-                    AgentTaskLog(
-                        id = nextId("task"),
-                        timeText = blueprintTimeText(scenarioClock),
-                        text = "新建家庭采购任务。",
-                    ),
-                ),
-                participants = listOf(
-                    AgentParticipant("ella", "E", "Ella", "family"),
-                ),
-                progressLine = AgentProgressLine(
-                    label = "进行中",
-                    detail = "整理待办事项",
-                    completed = 1,
-                    total = 4,
-                ),
+                conversationItems = seed.conversations.map { it.toConversationItem() },
+                taskLogs = seed.logs.toFamilyTaskLogs(blueprintTimeText(scenarioClock)),
+                participants = seed.participants.map { it.toAgentParticipant() },
+                progressLine = seed.progress.toProgressLine(),
             )
             _frame.update {
                 it.copy(
@@ -2564,7 +2521,6 @@ class AgentExperienceViewModel
             private const val SCRIPTED_ACTION_PREFIX = "MULTI:"
             private const val ONE_HOUR_SCENARIO_ID = "one_hour_aio"
             private const val PET_TASK_ID = "pet-grooming-live"
-            private const val FAMILY_TASK_ID = "family-shopping-live"
             private const val PACKAGE_TASK_ID = "coldchain-delivery-live"
             private const val HEALTH_TASK_ID = "health-supply-live"
             private val INITIAL_SCENARIO_CLOCK: LocalDateTime = LocalDateTime.of(2027, 4, 25, 13, 0)

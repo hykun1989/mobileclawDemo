@@ -1,0 +1,31 @@
+{
+  "callTranscripts": [
+    {
+      "audioRef": "ella-call-ended",
+      "contact": "Ella",
+      "durationSeconds": 126,
+      "transcript": "Ella 说下午如果方便，帮家里补低脂牛奶、常用洗衣液和一点水果；她强调牛奶和洗衣液优先，水果顺路再买。",
+      "tasks": [
+        {
+          "title": "家庭采购",
+          "priority": "normal",
+          "items": ["低脂牛奶", "常用洗衣液", "水果可选"]
+        }
+      ]
+    }
+  ],
+  "semanticPlaces": [
+    {
+      "id": "place-petsmart",
+      "label": "PetSmart",
+      "address": "世纪大道宠物护理中心",
+      "type": "pet_service"
+    },
+    {
+      "id": "place-ole",
+      "label": "Ole",
+      "address": "陆家嘴中心店",
+      "type": "market"
+    }
+  ]
+}

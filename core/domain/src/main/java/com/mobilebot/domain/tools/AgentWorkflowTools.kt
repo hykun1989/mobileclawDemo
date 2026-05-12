@@ -84,7 +84,7 @@ class ResolvePlaceTool
             {
               "type": "object",
               "properties": {
-                "label": {"type": "string", "description": "Place phrase, for example home, downstairs, preferred PetSmart, usual supermarket, or a mall mentioned by Ella."},
+                "label": {"type": "string", "description": "Place phrase, for example home, downstairs, a preferred service location, a usual store, or a place mentioned in conversation."},
                 "context": {"type": "string", "description": "Optional surrounding text."}
               },
               "required": ["label"]
@@ -98,7 +98,7 @@ class ResolvePlaceTool
             return try {
                 val args = JSONObject(argumentsJson)
                 val label = args.optString("label").trim()
-                val place = resolvePlace(label, args.optString("context"))
+                val place = AgentContextResolver.resolvePlace(label, args.optString("context"))
                 ToolResult(
                     ok = true,
                     message = "Place resolved: ${place["label"]}",
@@ -136,8 +136,12 @@ class TranscribeCallTool
         override suspend fun execute(argumentsJson: String): ToolResult {
             return try {
                 val args = JSONObject(argumentsJson)
-                val contact = args.optString("contact").ifBlank { "Ella" }
-                val transcript = transcriptFor(args.optString("audioRef"), contact)
+                val contact = args.optString("contact").ifBlank { "caller" }
+                val transcript = AgentContextResolver.transcribeCall(
+                    audioRef = args.optString("audioRef"),
+                    contact = contact,
+                    taskFocus = args.optString("taskFocus"),
+                )
                 ToolResult(
                     ok = true,
                     message = "Call transcript returned: $contact",
@@ -296,49 +300,45 @@ private fun parseMcpResult(response: String): Map<String, Any?> {
     }
 }
 
-private fun resolvePlace(
-    rawLabel: String,
-    context: String,
-): Map<String, Any?> {
-    val label = "$rawLabel $context".lowercase()
-    return when {
-        label.contains("petsmart") ->
-            mapOf("id" to "place-petsmart", "label" to "PetSmart", "address" to "世纪大道宠物护理中心", "type" to "pet_service")
-        label.contains("ole") || label.contains("超市") || label.contains("商场") ->
-            mapOf("id" to "place-ole", "label" to "Ole", "address" to "陆家嘴中心店", "type" to "market")
-        label.contains("楼下") || label.contains("downstairs") ->
-            mapOf("id" to "place-home-downstairs", "label" to "家楼下", "address" to "浦东家楼下临停点", "type" to "home_pickup")
-        label.contains("home") || label.contains("家") ->
-            mapOf("id" to "place-home", "label" to "家", "address" to "上海浦东家中", "type" to "home")
-        else ->
-            mapOf("id" to "place-${rawLabel.lowercase().replace(Regex("""\s+"""), "-")}", "label" to rawLabel, "address" to rawLabel, "type" to "semantic")
+private object AgentContextResolver {
+    fun resolvePlace(
+        rawLabel: String,
+        context: String,
+    ): Map<String, Any?> {
+        val label = "$rawLabel $context".lowercase()
+        val normalizedLabel = rawLabel.ifBlank { "unknown" }
+        return when {
+            label.contains("楼下") || label.contains("downstairs") ->
+                mapOf("id" to "place-home-downstairs", "label" to "家楼下", "address" to "常用家庭楼下临停点", "type" to "home_pickup")
+            label.contains("home") || label.contains("家") ->
+                mapOf("id" to "place-home", "label" to "家", "address" to "家庭地址", "type" to "home")
+            label.contains("超市") || label.contains("商场") || label.contains("store") || label.contains("mall") ->
+                mapOf("id" to stablePlaceId(normalizedLabel), "label" to normalizedLabel, "address" to normalizedLabel, "type" to "retail")
+            else ->
+                mapOf("id" to stablePlaceId(normalizedLabel), "label" to normalizedLabel, "address" to normalizedLabel, "type" to "semantic")
+        }
     }
-}
 
-private fun transcriptFor(
-    audioRef: String,
-    contact: String,
-): Map<String, Any?> =
-    when {
-        contact.equals("Ella", ignoreCase = true) || audioRef.contains("ella", ignoreCase = true) ->
-            mapOf(
-                "audioRef" to audioRef,
-                "contact" to "Ella",
-                "durationSeconds" to 126,
-                "transcript" to "Ella 说下午如果方便，帮家里补低脂牛奶、常用洗衣液和一点水果；她强调牛奶和洗衣液优先，水果顺路再买。",
-                "tasks" to listOf(
-                    mapOf("title" to "家庭采购", "priority" to "normal", "items" to listOf("低脂牛奶", "常用洗衣液", "水果可选")),
-                ),
-            )
-        else ->
-            mapOf(
-                "audioRef" to audioRef,
-                "contact" to contact,
-                "durationSeconds" to 60,
-                "transcript" to "通话中提到一个需要后续跟进的事项。",
-                "tasks" to listOf(mapOf("title" to "通话待办", "priority" to "normal")),
-            )
+    fun transcribeCall(
+        audioRef: String,
+        contact: String,
+        taskFocus: String,
+    ): Map<String, Any?> {
+        val title = taskFocus.ifBlank { "通话待办" }
+        return mapOf(
+            "audioRef" to audioRef,
+            "contact" to contact,
+            "durationSeconds" to 60,
+            "transcript" to "通话中提到一个需要后续跟进的事项。",
+            "tasks" to listOf(
+                mapOf("title" to title, "priority" to "normal"),
+            ),
+        )
     }
+
+    private fun stablePlaceId(label: String): String =
+        "place-${label.lowercase().replace(Regex("""\s+"""), "-")}"
+}
 
 private fun normalizeAmount(raw: String): String {
     val trimmed = raw.trim()

@@ -139,8 +139,12 @@ class AgentExperienceViewModel
         }
 
         fun accelerateClockUntilNextEvent() {
+            accelerateClockUntilNextEvent(allowWhilePaused = false)
+        }
+
+        private fun accelerateClockUntilNextEvent(allowWhilePaused: Boolean) {
             if (deferredRetriggerInProgress) return
-            if (shouldPauseLiveClock()) return
+            if (!allowWhilePaused && shouldPauseLiveClock()) return
             if (fastClockJob?.isActive == true) return
             val target = nextDeliverableTimelineEvent()?.triggerAt ?: return
             clockMode = ScenarioClockMode.FastUntilNextEvent
@@ -1054,7 +1058,7 @@ class AgentExperienceViewModel
                 viewModelScope.launch {
                     delay(CALL_CONNECTED_DISPLAY_MS)
                     if (_frame.value.activeCall != null) {
-                        accelerateClockUntilNextEvent()
+                        accelerateClockUntilNextEvent(allowWhilePaused = true)
                     }
                 }
             }

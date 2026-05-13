@@ -6,10 +6,13 @@ import com.mobilebot.systemruntime.IncomingCallEvent
 import com.mobilebot.systemruntime.IncomingSmsEvent
 import com.mobilebot.systemruntime.ReminderFiredEvent
 import com.mobilebot.systemruntime.RuntimeNotificationEvent
+import com.mobilebot.systemruntime.SystemRuntimeEvent
+import java.io.File
 import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONObject
 
 class OneHourScenarioFlowTest {
     private val now: LocalDateTime = LocalDateTime.of(2027, 4, 25, 13, 5)
@@ -109,6 +112,47 @@ class OneHourScenarioFlowTest {
     }
 
     @Test
+    fun allScriptEventsHaveExplicitFlowCoverage() {
+        val scriptEventIds = scriptEvents().map { it.getString("id") }.toSet()
+
+        assertTrue(
+            "Script has unregistered events: ${scriptEventIds - OneHourScenarioFlow.supportedEventIds}",
+            OneHourScenarioFlow.supportedEventIds.containsAll(scriptEventIds),
+        )
+        assertTrue(
+            "Flow declares events that are not in script: ${OneHourScenarioFlow.supportedEventIds - scriptEventIds}",
+            scriptEventIds.containsAll(OneHourScenarioFlow.supportedEventIds),
+        )
+    }
+
+    @Test
+    fun acceptedPetSlotRoutesEveryScriptEventToAnEffect() {
+        val flow = OneHourScenarioFlow()
+        flow.acceptPetCareSlot("可以")
+
+        val emptyRoutes = scriptEvents()
+            .map { it.getString("id") to flow.handle(it.toRuntimeEvent()) }
+            .filter { (_, effects) -> effects.isEmpty() }
+            .map { (id, _) -> id }
+
+        assertTrue("Accepted route dropped events: $emptyRoutes", emptyRoutes.isEmpty())
+    }
+
+    @Test
+    fun keepingOriginalPetSlotSuppressesPetFollowupEventsOnly() {
+        val flow = OneHourScenarioFlow()
+        flow.keepOriginalPetCareSlot("不改了")
+
+        val routedPetEvents = scriptEvents()
+            .filter { it.getString("id") in OneHourScenarioFlow.petAcceptanceRequiredEventIds }
+            .map { it.getString("id") to flow.handle(it.toRuntimeEvent()) }
+            .filter { (_, effects) -> effects.isNotEmpty() }
+            .map { (id, _) -> id }
+
+        assertTrue("Original-slot branch still routed pet followups: $routedPetEvents", routedPetEvents.isEmpty())
+    }
+
+    @Test
     fun incomingCallShowsLayerAndCallEndCreatesFamilyTask() {
         val flow = OneHourScenarioFlow()
 
@@ -195,4 +239,33 @@ class OneHourScenarioFlowTest {
             title = title,
             body = body,
         )
+
+    private fun scriptEvents(): List<JSONObject> {
+        val file = listOf(
+            File("core/data/src/main/assets/skills/md/one-hour-aio/SYSTEM_RUNTIME.json"),
+            File("../core/data/src/main/assets/skills/md/one-hour-aio/SYSTEM_RUNTIME.json"),
+            File("../../core/data/src/main/assets/skills/md/one-hour-aio/SYSTEM_RUNTIME.json"),
+        ).firstOrNull { it.isFile } ?: error("one-hour runtime script not found")
+        val content = file.readText().trimStart('\uFEFF').trim()
+        val events = JSONObject(content).getJSONArray("scenarioEvents")
+        return (0 until events.length()).map { events.getJSONObject(it) }
+    }
+
+    private fun JSONObject.toRuntimeEvent(): SystemRuntimeEvent {
+        val id = getString("id")
+        val source = getString("source")
+        val title = getString("title")
+        val body = getString("body")
+        val timeParts = getString("time").split(":").map { it.toInt() }
+        val occurredAt = now.withHour(timeParts[0]).withMinute(timeParts[1])
+
+        return when (getString("type")) {
+            "incoming_sms" -> IncomingSmsEvent(id, occurredAt, source, title, body, source)
+            "incoming_call" -> IncomingCallEvent(id, occurredAt, source, title, body, source)
+            "call_ended" -> CallEndedEvent(id, occurredAt, source, title, body, source, id)
+            "reminder_fired" -> ReminderFiredEvent(id, occurredAt, source, title, body, id)
+            "notification" -> RuntimeNotificationEvent(id, occurredAt, source, title, body)
+            else -> error("Unsupported event type: ${getString("type")}")
+        }
+    }
 }

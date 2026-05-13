@@ -30,4 +30,5 @@ dependencies {
     implementation(project(":scenarios:coldchain-delivery"))
     implementation(project(":scenarios:health-supply"))
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20231013")
 }

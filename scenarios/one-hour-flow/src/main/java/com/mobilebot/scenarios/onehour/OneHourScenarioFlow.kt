@@ -83,7 +83,7 @@ class OneHourScenarioFlow {
 
     private fun handleRuntimeNotification(event: RuntimeNotificationEvent): List<OneHourFlowEffect> =
         when (event.id) {
-            "property-parking-notice" -> listOf(OneHourFlowEffect.UpdateTask(PetGroomingTaskSurface.propertyParkingNotice(event.body)))
+            "property-parking-notice" -> ifPetAccepted(PetGroomingTaskSurface.propertyParkingNotice(event.body))
             "pharmacy-restock" -> listOf(OneHourFlowEffect.CreateTask(HealthSupplyTaskSurface.pharmacyRestock(event.body)))
             "market-delivery-window" -> listOf(OneHourFlowEffect.UpdateTask(FamilyShoppingTaskSurface.marketDeliveryCandidate(event.body)))
             "courier-coldchain-arriving" -> listOf(OneHourFlowEffect.CreateTask(ColdchainDeliveryTaskSurface.arriving(event.body)))
@@ -128,4 +128,40 @@ class OneHourScenarioFlow {
 
     private fun ifPetAccepted(update: ScenarioTaskUpdate): List<OneHourFlowEffect> =
         if (petCareAccepted) listOf(OneHourFlowEffect.UpdateTask(update)) else emptyList()
+
+    companion object {
+        val supportedEventIds: Set<String> = setOf(
+            "petsmart-open-slot",
+            "driver-1320-confirm",
+            "ella-call",
+            "ella-call-ended",
+            "property-parking-notice",
+            "ella-shopping-followup",
+            "kylin-downstairs-reminder",
+            "driver-kylin-picked-up",
+            "pharmacy-restock",
+            "market-delivery-window",
+            "courier-coldchain-arriving",
+            "driver-arrived-petsmart",
+            "petsmart-service-started",
+            "courier-coldchain-delivered",
+            "ella-shopping-clarify",
+            "property-courier-help",
+            "property-coldchain-secured",
+            "petsmart-service-progress",
+            "health-supply-candidate",
+            "market-order-locked",
+            "health-supply-held",
+        )
+
+        val petAcceptanceRequiredEventIds: Set<String> = setOf(
+            "driver-1320-confirm",
+            "property-parking-notice",
+            "kylin-downstairs-reminder",
+            "driver-kylin-picked-up",
+            "driver-arrived-petsmart",
+            "petsmart-service-started",
+            "petsmart-service-progress",
+        )
+    }
 }

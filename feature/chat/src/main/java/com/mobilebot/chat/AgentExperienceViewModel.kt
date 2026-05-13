@@ -1984,7 +1984,13 @@ class AgentExperienceViewModel
                         referenceCommands = oneHourFlow.keepOriginalPetCareSlotCommands(displayText),
                         fallback = { keepOriginalSlot(displayText) },
                     )
-                    else -> askOpenSlotClarification(displayText)
+                    else -> runScenarioAgentForDecision(
+                        displayText = displayText,
+                        normalizedIntent = normalized.intent,
+                        presentedActions = presentedActions,
+                        referenceCommands = oneHourFlow.openSlotClarificationCommands(displayText),
+                        fallback = { askOpenSlotClarification(displayText) },
+                    )
                 }
             }
         }

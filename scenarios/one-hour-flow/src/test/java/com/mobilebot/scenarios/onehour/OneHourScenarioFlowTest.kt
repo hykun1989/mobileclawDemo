@@ -105,6 +105,20 @@ class OneHourScenarioFlowTest {
     }
 
     @Test
+    fun unclearPetSlotReplyCreatesBlockedClarificationCommand() {
+        val command = OneHourScenarioFlow()
+            .openSlotClarificationCommands("都可以")
+            .single() as ScenarioAgentCommand.UpdateTask
+
+        assertEquals("pet-grooming-live", command.update.taskId)
+        assertEquals(ScenarioSurfaceStatus.BLOCKED, command.update.status)
+        assertEquals("等待用户决策", command.update.progress.detail)
+        assertEquals(listOf("可以", "不改了"), command.update.decision?.actions?.map { it.label })
+        assertTrue(command.update.conversations.any { it.text == "都可以" })
+        assertTrue(command.update.conversations.any { it.text.contains("14:00") && it.text.contains("17:00") })
+    }
+
+    @Test
     fun keepingOriginalPetSlotDoesNotUnlockDriverOrReminderEvents() {
         val flow = OneHourScenarioFlow()
         val keepOriginal = flow.keepOriginalPetCareSlot("不改了")

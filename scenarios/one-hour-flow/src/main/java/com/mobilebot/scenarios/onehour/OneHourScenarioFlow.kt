@@ -6,6 +6,8 @@ import com.mobilebot.scenarios.healthsupply.HealthSupplyTaskSurface
 import com.mobilebot.scenarios.petgrooming.PetGroomingTaskSurface
 import com.mobilebot.scenarios.runtime.ScenarioAgentCommand
 import com.mobilebot.scenarios.runtime.ScenarioLog
+import com.mobilebot.scenarios.runtime.ScenarioProgress
+import com.mobilebot.scenarios.runtime.ScenarioSurfaceStatus
 import com.mobilebot.scenarios.runtime.ScenarioTaskSeed
 import com.mobilebot.scenarios.runtime.ScenarioTaskUpdate
 import com.mobilebot.systemruntime.CallEndedEvent
@@ -97,6 +99,24 @@ class OneHourScenarioFlow {
     fun keepOriginalPetCareSlotCommands(label: String): List<ScenarioAgentCommand> {
         petCareAccepted = false
         return listOf(ScenarioAgentCommand.UpdateTask(PetGroomingTaskSurface.keepOriginalSlot(label)))
+    }
+
+    fun openSlotClarificationCommands(userText: String): List<ScenarioAgentCommand> {
+        val (conversations, decision) = PetGroomingTaskSurface.openSlotClarification(userText)
+        val update = ScenarioTaskUpdate(
+            taskId = PetGroomingTaskSurface.TASK_ID,
+            subtitle = "PetSmart 14:00 空档待确认",
+            status = ScenarioSurfaceStatus.BLOCKED,
+            conversations = conversations,
+            progress = ScenarioProgress(
+                label = "等待",
+                detail = "等待用户决策",
+                completed = 0,
+                total = 7,
+            ),
+            decision = decision,
+        )
+        return listOf(ScenarioAgentCommand.UpdateTask(update))
     }
 
     // 系统事件只描述外部事实，这里把事实分发给对应场景处理器。

@@ -1593,6 +1593,10 @@ class AgentExperienceViewModel
                 // 快进由单独 Job 执行，避免普通时钟循环并发推进。
                 return
             }
+            if (shouldPauseLiveClock()) {
+                resetLiveClockAnchor()
+                return
+            }
             val elapsedMinutes = (SystemClock.elapsedRealtime() - liveClockAnchorMs) / SCENARIO_CLOCK_TICK_MS
             if (elapsedMinutes > 0L) {
                 liveClockAnchorMs += elapsedMinutes * SCENARIO_CLOCK_TICK_MS
@@ -1636,6 +1640,12 @@ class AgentExperienceViewModel
         private fun resetLiveClockAnchor() {
             liveClockAnchorMs = SystemClock.elapsedRealtime()
         }
+
+        private fun shouldPauseLiveClock(): Boolean =
+            _frame.value.busy ||
+                _frame.value.decisionPrompt != null ||
+                _frame.value.systemNotification != null ||
+                _frame.value.activeCall != null
 
         private fun shouldHoldTimelineEvent(event: ScenarioTimelineEvent): Boolean =
             event.id in OneHourScenarioFlow.petAcceptanceRequiredEventIds && !oneHourFlow.isPetCareAccepted()

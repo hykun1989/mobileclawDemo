@@ -83,7 +83,6 @@ class AgentExperienceViewModel
         private val taskSessionIds = mutableMapOf<String, String>()
         private val pinnedTaskIds = linkedSetOf<String>()
         private val scenarioRunTracker = OneHourScenarioRunTracker()
-        private val endedCallNotificationIds = mutableSetOf<String>()
         private val oneHourFlow = OneHourScenarioFlow()
         // 系统事件只负责投放外部事实，具体任务编排由 Agent 处理。
         private val timelineScript: List<ScenarioTimelineEvent> by lazy {
@@ -992,9 +991,7 @@ class AgentExperienceViewModel
             var shouldAutoAdvanceActiveCall = false
             _frame.update { frame ->
                 val notification = frame.systemNotification
-                val isIncomingCallAction = notification?.actionLabel == "接听"
-                val isExpiredIncomingCall = isIncomingCallAction && notification.id in endedCallNotificationIds
-                val call = if (isIncomingCallAction && !isExpiredIncomingCall) {
+                val call = if (notification != null && notification.actionLabel.trim() == "接听") {
                     // 接听后短暂展示通话态，再自动推进到系统通话结束事件。
                     shouldAutoAdvanceActiveCall = true
                     AgentActiveCall(
@@ -1009,7 +1006,7 @@ class AgentExperienceViewModel
                 }
                 frame.copy(
                     systemNotification = null,
-                    activeCall = if (isExpiredIncomingCall) null else call,
+                    activeCall = call,
                 )
             }
             if (shouldAutoAdvanceActiveCall) {
@@ -1716,7 +1713,6 @@ class AgentExperienceViewModel
         }
 
         private fun clearSystemLayer(ids: Set<String>) {
-            endedCallNotificationIds += ids
             _frame.update {
                 it.copy(
                     systemNotification = if (it.systemNotification?.id in ids) null else it.systemNotification,

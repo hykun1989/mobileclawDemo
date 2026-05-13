@@ -20,3 +20,8 @@ android {
         jvmTarget = "17"
     }
 }
+
+dependencies {
+    testImplementation(libs.junit)
+    testImplementation("org.json:json:20231013")
+}

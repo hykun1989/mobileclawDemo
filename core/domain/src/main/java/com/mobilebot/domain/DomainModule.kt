@@ -25,6 +25,7 @@ import com.mobilebot.domain.tools.SpawnSubtaskTool
 import com.mobilebot.domain.tools.CreateCalendarEventTool
 import com.mobilebot.domain.tools.CreateNotificationTool
 import com.mobilebot.domain.tools.DeepLinkAppTool
+import com.mobilebot.domain.tools.EmitScenarioCommandsTool
 import com.mobilebot.domain.tools.GetDeviceStateTool
 import com.mobilebot.domain.tools.PlayMediaTool
 import com.mobilebot.domain.tools.QueryCalendarTool
@@ -184,4 +185,8 @@ abstract class DomainToolModule {
     @Binds
     @IntoSet
     abstract fun bindRecordExpense(tool: RecordExpenseTool): Tool
+
+    @Binds
+    @IntoSet
+    abstract fun bindEmitScenarioCommands(tool: EmitScenarioCommandsTool): Tool
 }

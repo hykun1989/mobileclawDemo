@@ -158,7 +158,7 @@ object ScenarioCommandCodec {
             )
             "ask_user" -> ScenarioAgentCommand.AskUser(
                 taskId = obj.requiredString("taskId", index),
-                decision = parseDecision(obj, index),
+                decision = parseDecision(obj.optJSONObject("decision") ?: obj, index),
             )
             "switch_task" -> ScenarioAgentCommand.SwitchTask(
                 taskId = obj.requiredString("taskId", index),

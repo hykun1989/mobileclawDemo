@@ -29,6 +29,7 @@ dependencies {
     implementation(project(":core:bus"))
     implementation(project(":core:bridge"))
     implementation(project(":core:network"))
+    implementation(project(":scenarios:runtime"))
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

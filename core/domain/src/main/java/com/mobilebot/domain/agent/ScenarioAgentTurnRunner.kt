@@ -41,14 +41,23 @@ class ScenarioAgentTurnRunner
                 maxTokens = MAX_TOKENS,
             )
 
-            val toolCall = response.toolCalls.firstOrNull { it.name == EmitScenarioCommandsTool.NAME }
-            return if (toolCall != null) {
+            val outputToolCalls = response.toolCalls.filter { it.name == EmitScenarioCommandsTool.NAME }
+            return if (outputToolCalls.size == 1) {
                 sessions.appendAssistantMessage(
                     sessionKey = sessionKey,
                     content = response.content.orEmpty(),
                     toolCalls = encodeToolCalls(response.toolCalls),
                 )
-                parseToolCall(sessionKey, toolCall, response.content.orEmpty())
+                parseToolCall(sessionKey, outputToolCalls.single(), response.content.orEmpty())
+            } else if (outputToolCalls.size > 1) {
+                val error = "同一轮只能调用一次 ${EmitScenarioCommandsTool.NAME}。"
+                sessions.appendAssistantMessage(
+                    sessionKey = sessionKey,
+                    content = response.content.orEmpty(),
+                    toolCalls = encodeToolCalls(response.toolCalls),
+                )
+                sessions.appendToolMessage(sessionKey, error, outputToolCalls.first().id, EmitScenarioCommandsTool.NAME)
+                ScenarioAgentTurnResult(error = error, rawText = response.content.orEmpty())
             } else {
                 response.content?.let { sessions.appendAssistantMessage(sessionKey, it) }
                 parseAssistantContent(response.content.orEmpty())
@@ -120,6 +129,14 @@ class ScenarioAgentTurnRunner
                 appendLine(currentTaskSnapshot.ifBlank { "(none)" })
                 appendLine("userInput:")
                 appendLine(userInput.ifBlank { "(none)" })
+                appendLine("normalizedIntent:")
+                normalizedIntent?.let { intent ->
+                    appendLine("id: ${intent.id}")
+                    appendLine("command: ${intent.command}")
+                    appendLine("meaning: ${intent.meaning}")
+                    appendLine("agentText:")
+                    appendLine(intent.agentText(userInput))
+                } ?: appendLine("(none)")
                 appendLine("presentedActions:")
                 if (presentedActions.isEmpty()) {
                     appendLine("(none)")
@@ -193,6 +210,7 @@ data class ScenarioAgentTurnInput(
     val eventFact: String = "",
     val currentTaskSnapshot: String = "",
     val userInput: String = "",
+    val normalizedIntent: AgentDecisionIntent? = null,
     val presentedActions: List<AgentDecisionAction> = emptyList(),
     val memoryDigest: String = "",
     val skillInstruction: String = "",

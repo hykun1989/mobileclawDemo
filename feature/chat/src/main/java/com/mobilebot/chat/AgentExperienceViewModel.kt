@@ -1931,6 +1931,7 @@ class AgentExperienceViewModel
             selectedActionValue: String?,
         ) {
             val prompt = _frame.value.decisionPrompt ?: return
+            val presentedActions = prompt.actions.map { it.toAgentDecisionAction() }
             if (selectedActionValue != null) {
                 pendingSelectedActionLabel = displayText
             }
@@ -1953,7 +1954,7 @@ class AgentExperienceViewModel
                     AgentDecisionInput(
                         contextId = scenario.scenarioId,
                         promptText = prompt.text,
-                        presentedActions = prompt.actions.map { it.toAgentDecisionAction() },
+                        presentedActions = presentedActions,
                         candidateIntents = OneHourScenarioPolicy.decisionIntents(scenario.scenarioId),
                         displayText = displayText,
                         rawText = rawText,
@@ -1971,11 +1972,15 @@ class AgentExperienceViewModel
                 when {
                     OneHourScenarioPolicy.isAcceptOpenSlot(normalized.intent) -> runScenarioAgentForDecision(
                         displayText = displayText,
+                        normalizedIntent = normalized.intent,
+                        presentedActions = presentedActions,
                         referenceCommands = oneHourFlow.acceptPetCareSlotCommands(displayText),
                         fallback = { acceptOpenSlot(displayText) },
                     )
                     OneHourScenarioPolicy.isKeepOriginalSlot(normalized.intent) -> runScenarioAgentForDecision(
                         displayText = displayText,
+                        normalizedIntent = normalized.intent,
+                        presentedActions = presentedActions,
                         referenceCommands = oneHourFlow.keepOriginalPetCareSlotCommands(displayText),
                         fallback = { keepOriginalSlot(displayText) },
                     )
@@ -1986,6 +1991,8 @@ class AgentExperienceViewModel
 
         private suspend fun runScenarioAgentForDecision(
             displayText: String,
+            normalizedIntent: AgentDecisionIntent,
+            presentedActions: List<AgentDecisionAction>,
             referenceCommands: List<ScenarioAgentCommand>,
             fallback: () -> Unit,
         ) {
@@ -2004,8 +2011,8 @@ class AgentExperienceViewModel
                             turnType = "user_decision",
                             taskId = taskId,
                             userInput = displayText,
-                            presentedActions = _frame.value.decisionPrompt?.actions.orEmpty()
-                                .map { it.toAgentDecisionAction() },
+                            normalizedIntent = normalizedIntent,
+                            presentedActions = presentedActions,
                             currentTaskSnapshot = taskSnapshotFor(taskId),
                             memoryDigest = memoryDigestForScenario(),
                             skillInstruction = OneHourScenarioPolicy.userDecisionInstruction(

@@ -109,6 +109,34 @@ class ScenarioAgentTurnRunnerTest {
     }
 
     @Test
+    fun rejectsMultipleOutputToolCallsInOneTurn() = runBlocking {
+        val command = """{"commands":[{"type":"switch_task","taskId":"pet-task"}]}"""
+        val result = runner(
+            StubLlmClient(
+                LlmResponse(
+                    content = "",
+                    toolCalls = listOf(
+                        LlmToolCall(
+                            id = "call-1",
+                            name = EmitScenarioCommandsTool.NAME,
+                            argumentsJson = command,
+                        ),
+                        LlmToolCall(
+                            id = "call-2",
+                            name = EmitScenarioCommandsTool.NAME,
+                            argumentsJson = command,
+                        ),
+                    ),
+                    finishReason = "tool_calls",
+                ),
+            ),
+        ).run(baseInput())
+
+        assertFalse(result.isOk)
+        assertTrue(result.error.orEmpty().contains("只能调用一次"))
+    }
+
+    @Test
     fun parsesJsonFromAssistantContentWhenToolCallIsMissing() = runBlocking {
         val result = runner(
             StubLlmClient(
@@ -124,6 +152,69 @@ class ScenarioAgentTurnRunnerTest {
         assertEquals("pet-task", result.commands.single().taskId)
     }
 
+    @Test
+    fun includesNormalizedIntentFactInUserDecisionPrompt() = runBlocking {
+        val llm = StubLlmClient(
+            LlmResponse(
+                content = "",
+                toolCalls = listOf(
+                    LlmToolCall(
+                        id = "call-1",
+                        name = EmitScenarioCommandsTool.NAME,
+                        argumentsJson = """{"commands":[{"type":"switch_task","taskId":"pet-task"}]}""",
+                    ),
+                ),
+                finishReason = "tool_calls",
+            ),
+        )
+
+        runner(llm).run(
+            baseInput(
+                turnType = "user_decision",
+                userInput = "行，就这么办",
+                normalizedIntent = ACCEPT,
+                presentedActions = listOf(AgentDecisionAction("可以", ACCEPT.command)),
+            ),
+        )
+
+        val prompt = llm.requests.single().last { it.role == "user" }.content.orEmpty()
+        assertTrue(prompt.contains("normalizedIntent:"))
+        assertTrue(prompt.contains("id: pet.accept"))
+        assertTrue(prompt.contains("command: USER_INTENT:pet.accept"))
+        assertTrue(prompt.contains("- 可以: USER_INTENT:pet.accept"))
+    }
+
+    @Test
+    fun keepsSessionHistoriesIsolatedBySessionId() = runBlocking {
+        val sessions = MemorySessionRepository()
+        val llm = StubLlmClient(
+            LlmResponse(
+                content = "",
+                toolCalls = listOf(
+                    LlmToolCall(
+                        id = "call-1",
+                        name = EmitScenarioCommandsTool.NAME,
+                        argumentsJson = """{"commands":[{"type":"switch_task","taskId":"task"}]}""",
+                    ),
+                ),
+                finishReason = "tool_calls",
+            ),
+        )
+        val runner = runner(llm, sessions)
+
+        runner.run(baseInput(sessionId = "session-a", taskId = "task-a"))
+        runner.run(baseInput(sessionId = "session-b", taskId = "task-b"))
+
+        val sessionA = sessions.getMessages("mobile:session-a")
+        val sessionB = sessions.getMessages("mobile:session-b")
+        assertEquals(3, sessionA.size)
+        assertEquals(3, sessionB.size)
+        assertTrue(sessionA.first().content.contains("task-a"))
+        assertFalse(sessionA.first().content.contains("task-b"))
+        assertTrue(sessionB.first().content.contains("task-b"))
+        assertFalse(sessionB.first().content.contains("task-a"))
+    }
+
     private fun runner(
         llm: LlmClient,
         sessions: SessionRepository = MemorySessionRepository(),
@@ -135,23 +226,42 @@ class ScenarioAgentTurnRunnerTest {
             outputTool = EmitScenarioCommandsTool(),
         )
 
-    private fun baseInput(): ScenarioAgentTurnInput =
+    private fun baseInput(
+        sessionId: String = "session-1",
+        taskId: String? = "pet-task",
+        turnType: String = "system_event",
+        userInput: String = "",
+        normalizedIntent: AgentDecisionIntent? = null,
+        presentedActions: List<AgentDecisionAction> = emptyList(),
+    ): ScenarioAgentTurnInput =
         ScenarioAgentTurnInput(
-            sessionId = "session-1",
+            sessionId = sessionId,
             scenarioId = "one-hour",
             skillName = "pet-grooming",
-            turnType = "system_event",
-            taskId = "pet-task",
+            turnType = turnType,
+            taskId = taskId,
             eventFact = "收到宠物店短信。",
             currentTaskSnapshot = "尚未创建任务。",
+            userInput = userInput,
+            normalizedIntent = normalizedIntent,
+            presentedActions = presentedActions,
             memoryDigest = "Y 周末上午不喜被打扰。",
             skillInstruction = "必要时询问用户。",
         )
+
+    private companion object {
+        val ACCEPT = AgentDecisionIntent(
+            id = "pet.accept",
+            displayLabel = "可以",
+            meaning = "User accepts the proposed slot.",
+        )
+    }
 }
 
 private class StubLlmClient(
     private val response: LlmResponse,
 ) : LlmClient {
+    val requests = mutableListOf<List<LlmMessage>>()
     override var defaultModel: String = "stub"
 
     override suspend fun chat(
@@ -159,7 +269,10 @@ private class StubLlmClient(
         tools: List<ToolDefinition>?,
         model: String?,
         maxTokens: Int,
-    ): LlmResponse = response
+    ): LlmResponse {
+        requests += messages
+        return response
+    }
 
     override fun chatStream(
         messages: List<LlmMessage>,

@@ -151,6 +151,11 @@ class AgentExperienceViewModel
                     val nextClock = scenarioClock.plusMinutes(1)
                     scenarioClock = if (nextClock.isAfter(target)) target else nextClock
                     _frame.update { it.withClock(scenarioClock) }
+                    // 快进每过一分钟就检查一次，触发下一个系统事件后立即停下。
+                    handleDueTimelineEvents()
+                    if (clockMode != ScenarioClockMode.FastUntilNextEvent) {
+                        return@launch
+                    }
                 }
                 handleDueTimelineEvents()
                 if (clockMode == ScenarioClockMode.FastUntilNextEvent) {

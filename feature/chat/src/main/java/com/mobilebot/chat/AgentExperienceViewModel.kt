@@ -158,6 +158,12 @@ class AgentExperienceViewModel
             }
         }
 
+        fun markScreenReady() {
+            if (clockMode == ScenarioClockMode.Live) {
+                resetLiveClockAnchor()
+            }
+        }
+
         fun startScenario() {
             if (_frame.value.busy) return
             if (_frame.value.hasStarted && _frame.value.error == null && _frame.value.finalSummary == null) return

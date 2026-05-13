@@ -99,6 +99,10 @@ fun AgentExperienceScreen(
     var blueprintOpen by rememberSaveable { mutableStateOf(false) }
     var autoOpenedTaskIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
 
+    LaunchedEffect(Unit) {
+        viewModel.markScreenReady()
+    }
+
     LaunchedEffect(frame.activeTaskId, frame.taskLogs.size) {
         val taskId = frame.activeTaskId
         if (taskId != null && frame.taskLogs.isNotEmpty() && taskId !in autoOpenedTaskIds) {

@@ -183,6 +183,34 @@ object OneHourScenarioPolicy {
 
     fun openSlotClarification(userText: String): Pair<List<ScenarioConversation>, ScenarioDecision> =
         PetGroomingTaskSurface.openSlotClarification(userText)
+
+    fun orchestrationInstruction(
+        eventId: String,
+        referenceCommandsJson: String,
+    ): String =
+        """
+            当前事件 id：$eventId。
+            你需要根据系统事件事实输出一批受控命令。参考命令批次如下，必须保持 taskId、任务标题、参与方、关键时间和决策点含义一致；可以只做必要的短文案润色。
+            如果参考批次为空，说明该系统事件只需要系统层展示或当前没有任务更新，此时返回 switch_task 或 update_task 仅当确实有任务需要同步。
+            不要输出解释文本，只调用 emit_scenario_commands。
+
+            referenceCommands:
+            $referenceCommandsJson
+        """.trimIndent()
+
+    fun userDecisionInstruction(
+        userText: String,
+        referenceCommandsJson: String,
+    ): String =
+        """
+            用户刚刚回复：$userText。
+            你需要把这个回复转成受控任务命令。参考命令批次如下，必须保持 taskId、参与方、短信对象、关键时间和流程含义一致。
+            如果用户意思不清楚，使用 ask_user 追问，不要自行推进。
+            不要输出解释文本，只调用 emit_scenario_commands。
+
+            referenceCommands:
+            $referenceCommandsJson
+        """.trimIndent()
 }
 
 class OneHourScenarioRunTracker {

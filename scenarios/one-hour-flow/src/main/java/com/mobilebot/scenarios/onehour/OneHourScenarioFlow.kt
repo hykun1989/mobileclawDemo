@@ -4,6 +4,7 @@ import com.mobilebot.scenarios.coldchaindelivery.ColdchainDeliveryTaskSurface
 import com.mobilebot.scenarios.familyshopping.FamilyShoppingTaskSurface
 import com.mobilebot.scenarios.healthsupply.HealthSupplyTaskSurface
 import com.mobilebot.scenarios.petgrooming.PetGroomingTaskSurface
+import com.mobilebot.scenarios.runtime.ScenarioAgentCommand
 import com.mobilebot.scenarios.runtime.ScenarioTaskSeed
 import com.mobilebot.scenarios.runtime.ScenarioTaskUpdate
 import com.mobilebot.systemruntime.CallEndedEvent
@@ -40,6 +41,14 @@ sealed interface OneHourFlowEffect {
 
 class OneHourScenarioFlow {
     private var petCareAccepted = false
+
+    fun markPetCareAccepted() {
+        petCareAccepted = true
+    }
+
+    fun markPetCareDeclined() {
+        petCareAccepted = false
+    }
 
     fun acceptPetCareSlot(label: String): OneHourFlowEffect.UpdateTask {
         petCareAccepted = true
@@ -130,6 +139,24 @@ class OneHourScenarioFlow {
         if (petCareAccepted) listOf(OneHourFlowEffect.UpdateTask(update)) else emptyList()
 
     companion object {
+        fun commandReferences(effects: List<OneHourFlowEffect>): List<ScenarioAgentCommand> =
+            effects.mapNotNull { effect ->
+                when (effect) {
+                    is OneHourFlowEffect.CreateTask -> ScenarioAgentCommand.CreateTask(effect.seed)
+                    is OneHourFlowEffect.UpdateTask -> ScenarioAgentCommand.UpdateTask(effect.update)
+                    else -> null
+                }
+            }
+
+        fun taskIdFromEffects(effects: List<OneHourFlowEffect>): String? =
+            effects.firstNotNullOfOrNull { effect ->
+                when (effect) {
+                    is OneHourFlowEffect.CreateTask -> effect.seed.taskId
+                    is OneHourFlowEffect.UpdateTask -> effect.update.taskId
+                    else -> null
+                }
+            }
+
         val supportedEventIds: Set<String> = setOf(
             "petsmart-open-slot",
             "driver-1320-confirm",

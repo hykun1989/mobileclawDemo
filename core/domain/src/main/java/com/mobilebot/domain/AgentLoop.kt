@@ -5,6 +5,7 @@ import com.mobilebot.domain.agent.ToolCallAgentLoop
 import com.mobilebot.domain.repository.SessionRepository
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,14 +20,16 @@ class AgentLoop
         private val toolCallLoop: ToolCallAgentLoop,
         private val sessions: SessionRepository,
     ) {
-        private val sessionMutex = Mutex()
+        private val sessionMutexes = ConcurrentHashMap<String, Mutex>()
 
         suspend fun processUserMessage(
             chatId: String,
             text: String,
         ) {
             val sessionKey = "$CHANNEL:$chatId"
-            sessionMutex.withLock {
+            // 不同任务各自串行，同一任务内保持消息顺序。
+            val mutex = sessionMutexes.computeIfAbsent(sessionKey) { Mutex() }
+            mutex.withLock {
                 try {
                     toolCallLoop.processUserMessage(chatId = chatId, text = text)
                 } catch (e: Exception) {

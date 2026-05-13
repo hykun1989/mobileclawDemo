@@ -17,14 +17,14 @@ class DeviceSystemTool
 
         override val definition: ToolDefinition = ToolDefinition(
             name = name,
-            description = "Use phone and OS capabilities exposed by the device system runtime. Prefer dedicated tools such as system_search_contacts and system_send_sms when available.",
+            description = "Use phone and OS capabilities exposed by the device system runtime. Prefer dedicated tools such as system_search_contacts and system_send_sms when available. Service lookup, transcript extraction, payment, accounting, and semantic place resolution should use their dedicated agent tools.",
             parametersSchema = """
             {
               "type": "object",
               "properties": {
                 "action": {
                   "type": "string",
-                  "description": "One of: send_sms, receive_sms, sms, dial_phone, call_log, notification, reminder, long_reminder, location, contacts, social_graph, device_state, memory_read, service_call, mcp_call, payment, accounting."
+                  "description": "One of: send_sms, receive_sms, sms, dial_phone, call_log, notification, reminder, long_reminder, location, contacts, social_graph, device_state, memory_read."
                 },
                 "params": {
                   "type": "object",

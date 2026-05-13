@@ -1,6 +1,59 @@
 package com.mobilebot.chat
 
 import com.mobilebot.domain.todo.TodoStatus
+import java.time.LocalDateTime
+
+enum class ScenarioClockMode {
+    Live,
+    FastUntilNextEvent,
+}
+
+data class ScenarioTimelineEvent(
+    val id: String,
+    val triggerAt: LocalDateTime,
+    val type: String,
+    val source: String,
+    val title: String,
+    val body: String,
+)
+
+data class AgentSystemEvent(
+    val id: String,
+    val timeText: String,
+    val source: String,
+    val title: String,
+    val body: String,
+)
+
+data class AgentTaskCard(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val status: AgentTimelineStatus,
+    val updatedTimeText: String,
+    val sortKey: Long = 0L,
+    val isActive: Boolean = false,
+    val isPinned: Boolean = false,
+)
+
+data class AgentTaskState(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val status: AgentTimelineStatus = AgentTimelineStatus.RUNNING,
+    val updatedTimeText: String,
+    val sortKey: Long = 0L,
+    val conversationItems: List<AgentConversationItem> = emptyList(),
+    val taskLogs: List<AgentTaskLog> = emptyList(),
+    val participants: List<AgentParticipant> = emptyList(),
+    val progressLine: AgentProgressLine = AgentProgressLine("进行中", "等待下一步"),
+    val timeline: List<AgentTimelineEvent> = emptyList(),
+    val stageCards: List<AgentStageCard> = emptyList(),
+    val decisionPrompt: DecisionPrompt? = null,
+    val activeActionValue: String? = null,
+    val finalSummary: String? = null,
+    val error: String? = null,
+)
 
 enum class AgentTimelineStatus {
     PENDING,
@@ -55,6 +108,14 @@ data class AgentSystemNotification(
     val actionLabel: String = "OK",
 )
 
+data class AgentActiveCall(
+    val id: String,
+    val caller: String,
+    val startedTimeText: String,
+    val statusText: String,
+    val transcriptText: String,
+)
+
 data class AgentProgressLine(
     val label: String,
     val detail: String,
@@ -80,12 +141,19 @@ data class AgentExperienceFrame(
     val statusLabel: String,
     val clockTimeText: String = "13:00",
     val clockDateText: String = "04/25/2027 Sat",
+    val clockMode: ScenarioClockMode = ScenarioClockMode.Live,
     val busy: Boolean = false,
     val hasStarted: Boolean = false,
+    val activeTaskId: String? = null,
+    val activeTaskTitle: String = "AIOS",
+    val activeTaskSubtitle: String = "正在等待系统事件",
+    val taskCards: List<AgentTaskCard> = emptyList(),
+    val recentSystemEvents: List<AgentSystemEvent> = emptyList(),
     val conversationItems: List<AgentConversationItem> = emptyList(),
     val taskLogs: List<AgentTaskLog> = emptyList(),
     val participants: List<AgentParticipant> = emptyList(),
     val systemNotification: AgentSystemNotification? = null,
+    val activeCall: AgentActiveCall? = null,
     val progressLine: AgentProgressLine = AgentProgressLine(
         label = statusLabel,
         detail = "Ready",
@@ -113,7 +181,7 @@ data class AgentExperienceFrame(
                     AgentTimelineEvent(
                         id = "ready",
                         title = "Ready to coordinate",
-                        detail = "The agent has the grooming context ready and can begin when started.",
+                        detail = "The agent is waiting for the next system signal.",
                         status = AgentTimelineStatus.PENDING,
                     ),
                 ),

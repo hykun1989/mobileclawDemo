@@ -1,14 +1,17 @@
 package com.mobilebot.chat
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -41,7 +44,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -56,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -69,13 +72,16 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
@@ -91,11 +97,34 @@ fun AgentExperienceScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var blueprintOpen by rememberSaveable { mutableStateOf(false) }
+    var autoOpenedTaskIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
+
+    LaunchedEffect(frame.activeTaskId, frame.taskLogs.size) {
+        val taskId = frame.activeTaskId
+        if (taskId != null && frame.taskLogs.isNotEmpty() && taskId !in autoOpenedTaskIds) {
+            blueprintOpen = true
+            autoOpenedTaskIds = autoOpenedTaskIds + taskId
+        }
+    }
+
+    LaunchedEffect(frame.systemNotification?.id) {
+        val notificationId = frame.systemNotification?.id ?: return@LaunchedEffect
+        // 提醒层无人处理时只关闭浮层，不触发按钮动作。
+        delay(SYSTEM_NOTIFICATION_AUTO_DISMISS_MS)
+        viewModel.expireSystemNotification(notificationId)
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            TraceDrawer(frame.debugTrace)
+            TaskSidebar(
+                tasks = frame.taskCards,
+                onSelectTask = { taskId ->
+                    viewModel.selectTask(taskId)
+                    scope.launch { drawerState.close() }
+                },
+                onToggleTaskPinned = viewModel::toggleTaskPinned,
+            )
         },
     ) {
         Surface(
@@ -108,11 +137,13 @@ fun AgentExperienceScreen(
             PhoneFlowCanvas(
                 frame = frame,
                 blueprintOpen = blueprintOpen,
-                onToggleBlueprint = { blueprintOpen = !blueprintOpen },
+                onOpenBlueprint = { blueprintOpen = true },
                 onCollapseBlueprint = { blueprintOpen = false },
-                onOpenTrace = { scope.launch { drawerState.open() } },
+                onOpenTaskSidebar = { scope.launch { drawerState.open() } },
                 onOpenSettings = onOpenSettings,
                 onOpenChat = onOpenChat,
+                onAccelerateClock = viewModel::accelerateClockUntilNextEvent,
+                onSelectTask = viewModel::selectTask,
                 onStart = viewModel::startScenario,
                 onAction = viewModel::chooseDecision,
                 onSubmitText = viewModel::submitDecisionText,
@@ -126,11 +157,13 @@ fun AgentExperienceScreen(
 private fun PhoneFlowCanvas(
     frame: AgentExperienceFrame,
     blueprintOpen: Boolean,
-    onToggleBlueprint: () -> Unit,
+    onOpenBlueprint: () -> Unit,
     onCollapseBlueprint: () -> Unit,
-    onOpenTrace: () -> Unit,
+    onOpenTaskSidebar: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenChat: () -> Unit,
+    onAccelerateClock: () -> Unit,
+    onSelectTask: (String) -> Unit,
     onStart: () -> Unit,
     onAction: (ActionButton) -> Unit,
     onSubmitText: (String) -> Unit,
@@ -143,35 +176,64 @@ private fun PhoneFlowCanvas(
             .imePadding(),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (blueprintOpen) {
-                BlueprintDeck(
-                    frame = frame,
-                )
-            } else {
+            if (!blueprintOpen) {
                 TimeHeader(
                     frame = frame,
-                    onToggleBlueprint = onToggleBlueprint,
-                    onOpenTrace = onOpenTrace,
+                    onAccelerateClock = onAccelerateClock,
+                    onOpenTaskSidebar = onOpenTaskSidebar,
                     onOpenSettings = onOpenSettings,
                 )
             }
-            SessionArea(
-                frame = frame,
-                blueprintOpen = blueprintOpen,
-                onCollapseBlueprint = onCollapseBlueprint,
-                onStart = onStart,
-                onAction = onAction,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 28.dp)
-                    .padding(top = if (blueprintOpen) 10.dp else 14.dp),
-            )
-            TaskProgressStrip(
-                frame = frame,
-                modifier = Modifier
-                    .padding(horizontal = 28.dp)
-                    .padding(top = 4.dp, bottom = 2.dp),
-            )
+            Box(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (frame.activeTaskId == null) {
+                        WorkbenchArea(
+                            frame = frame,
+                            onSelectTask = onSelectTask,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 28.dp)
+                                .padding(top = 14.dp),
+                        )
+                    } else {
+                        SessionArea(
+                            frame = frame,
+                            blueprintOpen = blueprintOpen,
+                            onCollapseBlueprint = onCollapseBlueprint,
+                            onStart = onStart,
+                            onAction = onAction,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 28.dp)
+                                .padding(top = 14.dp),
+                        )
+                    }
+                }
+                if (blueprintOpen) {
+                    BlueprintDeck(
+                        frame = frame,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(20f),
+                    )
+                }
+                frame.activeCall?.let { activeCall ->
+                    ActiveCallOverlay(
+                        call = activeCall,
+                        currentTimeText = frame.clockTimeText,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            if (frame.activeTaskId != null) {
+                TaskProgressStrip(
+                    frame = frame,
+                    onOpenBlueprint = onOpenBlueprint,
+                    modifier = Modifier
+                        .padding(horizontal = 28.dp)
+                        .padding(top = 4.dp, bottom = 2.dp),
+                )
+            }
             InteractionDock(
                 active = frame.decisionPrompt != null && !frame.busy,
                 onOpenChat = onOpenChat,
@@ -185,15 +247,44 @@ private fun PhoneFlowCanvas(
                 onDismiss = onDismissNotification,
             )
         }
+        if (blueprintOpen) {
+            FloatingTaskMenuButton(
+                onClick = onOpenTaskSidebar,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 20.dp, top = 24.dp)
+                    .zIndex(100f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FloatingTaskMenuButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .size(48.dp)
+            .clickable(onClick = onClick),
+        color = AgentPanel.copy(alpha = 0.9f),
+        contentColor = AgentWhite,
+        shape = CircleShape,
+        border = BorderStroke(1.dp, AgentWhite.copy(alpha = 0.16f)),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Menu, contentDescription = "任务", tint = AgentWhite)
+        }
     }
 }
 
 @Composable
 private fun TimeHeader(
     frame: AgentExperienceFrame,
-    onOpenTrace: () -> Unit,
+    onOpenTaskSidebar: () -> Unit,
     onOpenSettings: () -> Unit,
-    onToggleBlueprint: () -> Unit,
+    onAccelerateClock: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
@@ -208,32 +299,35 @@ private fun TimeHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onOpenTrace) {
-                Icon(Icons.Default.Menu, contentDescription = "Execution trace", tint = AgentWhite)
+            IconButton(onClick = onOpenTaskSidebar) {
+                Icon(Icons.Default.Menu, contentDescription = "任务", tint = AgentWhite)
             }
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(onClick = onToggleBlueprint),
+                modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text(
-                    text = frame.clockTimeText,
-                    color = AgentWhite,
-                    fontSize = 32.sp,
-                    lineHeight = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                )
-                Text(
-                    text = frame.clockDateText,
-                    color = AgentMuted,
-                    fontSize = 12.sp,
-                    lineHeight = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(
+                    modifier = Modifier.clickable(onClick = onAccelerateClock),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = frame.clockTimeText,
+                        color = AgentWhite,
+                        fontSize = 32.sp,
+                        lineHeight = 36.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = frame.clockDateText,
+                        color = AgentMuted,
+                        fontSize = 12.sp,
+                        lineHeight = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AgentWhite)
@@ -243,8 +337,78 @@ private fun TimeHeader(
 }
 
 @Composable
+private fun AiWorkFloatingButton(
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "ai_work")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+        ),
+        label = "ai_work_phase",
+    )
+    Surface(
+        modifier = modifier
+            .size(36.dp)
+            .clickable(onClick = onClick)
+            .drawWithContent {
+                drawContent()
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val orbitRadius = size.minDimension * 0.38f
+                val baseColor = if (active) Color(0xFF68C8FF) else AgentMuted
+                drawCircle(
+                    color = baseColor.copy(alpha = if (active) 0.18f else 0.06f),
+                    radius = size.minDimension * (0.42f + 0.08f * phase),
+                    center = center,
+                )
+                drawCircle(
+                    color = baseColor.copy(alpha = if (active) 0.36f else 0.14f),
+                    radius = orbitRadius,
+                    center = center,
+                    style = Stroke(width = 1.5.dp.toPx()),
+                )
+                val angle = phase * 2f * PI.toFloat()
+                val dot = Offset(
+                    x = center.x + cos(angle) * orbitRadius,
+                    y = center.y + sin(angle) * orbitRadius,
+                )
+                drawCircle(
+                    color = baseColor.copy(alpha = if (active) 0.96f else 0.54f),
+                    radius = 2.2.dp.toPx(),
+                    center = dot,
+                )
+                drawCircle(
+                    color = AgentWhite.copy(alpha = if (active) 0.58f else 0.24f),
+                    radius = 1.dp.toPx(),
+                    center = center,
+                )
+            },
+        color = AgentPanel.copy(alpha = 0.92f),
+        contentColor = AgentWhite,
+        shape = CircleShape,
+        border = BorderStroke(1.dp, Color(0xFF68C8FF).copy(alpha = if (active) 0.58f else 0.2f)),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = "AI",
+                color = AgentWhite,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
 private fun BlueprintDeck(
     frame: AgentExperienceFrame,
+    modifier: Modifier = Modifier,
 ) {
     val latestLogIndex = frame.taskLogs.lastIndex.coerceAtLeast(0)
     val latestLogKey = frame.taskLogs.lastOrNull()?.let { row ->
@@ -260,7 +424,7 @@ private fun BlueprintDeck(
     }
 
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(430.dp),
         color = BlueprintGray,
@@ -279,7 +443,7 @@ private fun BlueprintDeck(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "麒麟日常洗护",
+                        text = frame.activeTaskTitle,
                         color = AgentWhite,
                         fontSize = 22.sp,
                         lineHeight = 26.sp,
@@ -349,6 +513,153 @@ private fun BlueprintPartyAvatar(label: String) {
 }
 
 @Composable
+private fun WorkbenchArea(
+    frame: AgentExperienceFrame,
+    onSelectTask: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
+    ) {
+        if (frame.taskCards.isEmpty() && frame.recentSystemEvents.isEmpty()) {
+            item {
+                Text(
+                    text = "等待系统事件。",
+                    color = AgentMuted,
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.padding(top = 24.dp),
+                )
+            }
+        }
+        if (frame.taskCards.isNotEmpty()) {
+            item {
+                Text(
+                    text = "任务",
+                    color = AgentWhite,
+                    fontSize = 18.sp,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            items(frame.taskCards, key = { it.id }) { task ->
+                TaskCardRow(task = task, onClick = { onSelectTask(task.id) })
+            }
+        }
+        if (frame.recentSystemEvents.isNotEmpty()) {
+            item {
+                Text(
+                    text = "系统事件",
+                    color = AgentWhite,
+                    fontSize = 18.sp,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            items(frame.recentSystemEvents, key = { it.id }) { event ->
+                SystemEventRow(event)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskCardRow(
+    task: AgentTaskCard,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = if (task.isActive) AgentPanelActive else AgentPanel,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    text = task.title,
+                    color = AgentWhite,
+                    fontSize = 16.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = task.subtitle,
+                    color = AgentMuted,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = task.updatedTimeText,
+                color = AgentMuted,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SystemEventRow(event: AgentSystemEvent) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = AgentPanel,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = event.timeText,
+                    color = AgentMuted,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    maxLines = 1,
+                )
+                Text(
+                    text = event.source,
+                    color = AgentWhite.copy(alpha = 0.78f),
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    maxLines = 1,
+                )
+            }
+            Text(
+                text = event.title,
+                color = AgentWhite,
+                fontSize = 15.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = event.body,
+                color = AgentMuted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SessionArea(
     frame: AgentExperienceFrame,
     blueprintOpen: Boolean,
@@ -364,10 +675,16 @@ private fun SessionArea(
     val activeDecision = frame.decisionPrompt != null
     val listState = rememberLazyListState()
     val lastItemIndex = messages.lastIndex + if (actions.isNotEmpty()) 1 else 0
+    val latestMessageKey = messages.lastOrNull()?.let { message ->
+        "${message.id}:${message.role}:${message.text}"
+    }.orEmpty()
+    val actionsKey = actions.joinToString("|") { action -> "${action.label}:${action.value}" }
 
-    LaunchedEffect(lastItemIndex, frame.statusLabel) {
+    LaunchedEffect(frame.activeTaskId, latestMessageKey, actionsKey, lastItemIndex, blueprintOpen) {
         if (lastItemIndex >= 0) {
-            listState.animateScrollToItem(lastItemIndex)
+            // 蓝图区展开会压缩会话区高度，需要重新锚定到最新消息。
+            withFrameNanos { }
+            listState.scrollToItem(lastItemIndex)
         }
     }
 
@@ -378,27 +695,33 @@ private fun SessionArea(
             modifier
         }
 
-    LazyColumn(
+    Column(
         modifier = areaModifier
             .fillMaxWidth()
             .testTag("session_area"),
-        state = listState,
-        contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        items(messages) { message ->
-            ConversationBubble(message)
-        }
-        if (actions.isNotEmpty()) {
-            item {
-                ConversationActionRow(
-                    actions = actions,
-                    activeActionValue = frame.activeActionValue,
-                    enabled = !frame.busy,
-                    onAction = { action ->
-                        if (activeDecision) onAction(action) else onStart()
-                    },
-                )
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            state = listState,
+            contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            items(messages) { message ->
+                ConversationBubble(message)
+            }
+            if (actions.isNotEmpty()) {
+                item {
+                    ConversationActionRow(
+                        actions = actions,
+                        activeActionValue = frame.activeActionValue,
+                        enabled = !frame.busy,
+                        onAction = { action ->
+                            if (activeDecision) onAction(action) else onStart()
+                        },
+                    )
+                }
             }
         }
     }
@@ -428,7 +751,6 @@ private fun ConversationActionRow(
         }
     }
 }
-
 @Composable
 private fun ActionOptionBubble(
     label: String,
@@ -685,6 +1007,7 @@ private fun positiveModulo(value: Float, modulus: Float): Float =
 @Composable
 private fun TaskProgressStrip(
     frame: AgentExperienceFrame,
+    onOpenBlueprint: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val progress = frame.progressLine
@@ -720,12 +1043,9 @@ private fun TaskProgressStrip(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = "${progress.completed}/${progress.total.coerceAtLeast(1)}",
-                color = AgentWhite,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
+            AiWorkFloatingButton(
+                active = frame.busy || frame.taskCards.isNotEmpty() || frame.recentSystemEvents.isNotEmpty(),
+                onClick = onOpenBlueprint,
             )
         }
     }
@@ -759,7 +1079,7 @@ private fun progressDetailText(value: String): String {
         "Waiting for confirmation" -> "等待触发"
         "Preparing the coordination flow" -> "正在准备协调流程"
         "User decision required" -> "等待用户决策"
-        "Advancing to the next missing grooming milestone." -> "正在推进下一个任务节点"
+        "Advancing to the next missing task milestone." -> "正在推进下一个任务节点"
         "Waiting for matching SMS" -> "等待匹配短信"
         "Loading coordination rules" -> "正在载入任务规则"
         "Preparing the task plan" -> "正在生成任务计划"
@@ -770,7 +1090,7 @@ private fun progressDetailText(value: String): String {
         "Continuing the workflow" -> "正在继续任务"
         "Continuing workflow" -> "正在继续任务"
         "User profile loaded." -> "已读取用户资料"
-        "Kylin's service preferences loaded." -> "已读取麒麟洗护偏好"
+        "Service preferences loaded." -> "已读取服务偏好"
         "Home and frequent places loaded." -> "已读取常用地点"
         "Trusted service relationships loaded." -> "已读取服务联系人"
         "Relevant contacts checked." -> "已确认相关联系人"
@@ -1072,6 +1392,121 @@ private fun SystemNotificationOverlay(
 }
 
 @Composable
+private fun ActiveCallOverlay(
+    call: AgentActiveCall,
+    currentTimeText: String,
+    modifier: Modifier = Modifier,
+) {
+    val pulse by rememberInfiniteTransition(label = "call_pulse").animateFloat(
+        initialValue = 0.42f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+        ),
+        label = "call_pulse_alpha",
+    )
+    Box(
+        modifier = modifier
+            .background(AgentBlack.copy(alpha = 0.93f))
+            .padding(horizontal = 28.dp)
+            .testTag("active_call"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(96.dp),
+                color = AgentPanelActive,
+                contentColor = AgentWhite,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, Color(0xFF68C8FF).copy(alpha = pulse)),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = call.caller.take(1),
+                        color = AgentWhite,
+                        fontSize = 36.sp,
+                        lineHeight = 40.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+            Text(
+                text = call.caller,
+                color = AgentWhite,
+                fontSize = 28.sp,
+                lineHeight = 34.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = call.statusText,
+                color = AgentWhite.copy(alpha = 0.74f),
+                fontSize = 15.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "${call.startedTimeText} 接通 · 当前 $currentTimeText",
+                color = AgentMuted,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                textAlign = TextAlign.Center,
+            )
+            Surface(
+                color = AgentPanel,
+                contentColor = AgentWhite,
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(1.dp, AgentWhite.copy(alpha = 0.16f)),
+            ) {
+                Text(
+                    text = call.transcriptText,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp),
+                    color = AgentWhite.copy(alpha = 0.88f),
+                    fontSize = 14.sp,
+                    lineHeight = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CallControlChip("静音")
+                CallControlChip("转写")
+                CallControlChip("免提")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallControlChip(text: String) {
+    Surface(
+        modifier = Modifier
+            .width(72.dp)
+            .height(44.dp),
+        color = AgentPanel,
+        contentColor = AgentWhite,
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = text,
+                color = AgentWhite.copy(alpha = 0.78f),
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
 private fun CircleToolButton(
     enabled: Boolean,
     onClick: () -> Unit,
@@ -1115,37 +1550,150 @@ private fun PillToolButton(
 }
 
 @Composable
-private fun TraceDrawer(trace: List<String>) {
-    ModalDrawerSheet(
-        drawerContainerColor = AgentPanel,
-        drawerContentColor = AgentWhite,
+private fun TaskSidebar(
+    tasks: List<AgentTaskCard>,
+    onSelectTask: (String) -> Unit,
+    onToggleTaskPinned: (String) -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxHeight()
+            .fillMaxWidth(0.46f),
+        color = AgentPanel,
+        contentColor = AgentWhite,
     ) {
-        Text(
-            text = "Execution Trace",
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-            color = AgentWhite,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        HorizontalDivider(color = AgentWhite.copy(alpha = 0.18f))
-        if (trace.isEmpty()) {
+        Column(modifier = Modifier.fillMaxSize()) {
             Text(
-                text = "No trace yet.",
-                modifier = Modifier.padding(20.dp),
-                color = AgentMuted,
+                text = "任务",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                color = AgentWhite,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
             )
-        } else {
-            LazyColumn(contentPadding = PaddingValues(12.dp)) {
-                items(trace) { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AgentMuted,
-                        modifier = Modifier.padding(vertical = 5.dp),
-                    )
+            HorizontalDivider(color = AgentWhite.copy(alpha = 0.18f))
+            if (tasks.isEmpty()) {
+                Text(
+                    text = "暂无任务",
+                    modifier = Modifier.padding(20.dp),
+                    color = AgentMuted,
+                )
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(tasks, key = { it.id }) { task ->
+                        SidebarTaskCard(
+                            task = task,
+                            onSelectTask = { onSelectTask(task.id) },
+                            onTogglePinned = { onToggleTaskPinned(task.id) },
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SidebarTaskCard(
+    task: AgentTaskCard,
+    onSelectTask: () -> Unit,
+    onTogglePinned: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(task.id, task.isPinned) {
+                detectTapGestures(
+                    onTap = { onSelectTask() },
+                    onLongPress = { onTogglePinned() },
+                )
+            },
+        color = if (task.isActive) AgentPanelActive else AgentBlack.copy(alpha = 0.46f),
+        contentColor = AgentWhite,
+        shape = RoundedCornerShape(8.dp),
+        border = if (task.isActive) BorderStroke(1.dp, AgentWhite.copy(alpha = 0.36f)) else null,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = task.title,
+                    color = AgentWhite,
+                    fontSize = 15.sp,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (task.isPinned) {
+                    PinIndicator(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(16.dp),
+                    )
+                }
+            }
+            Text(
+                text = task.subtitle,
+                color = AgentMuted,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = task.updatedTimeText,
+                color = AgentWhite.copy(alpha = 0.56f),
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PinIndicator(
+    modifier: Modifier = Modifier,
+) {
+    val color = Color(0xFF68C8FF)
+    Canvas(modifier = modifier) {
+        val strokeWidth = 1.6.dp.toPx()
+        val headRadius = 2.6.dp.toPx()
+        val head = Offset(size.width * 0.36f, size.height * 0.26f)
+        val shoulder = Offset(size.width * 0.68f, size.height * 0.56f)
+        val point = Offset(size.width * 0.30f, size.height * 0.86f)
+        drawCircle(color = color, radius = headRadius, center = head)
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.46f, size.height * 0.34f),
+            end = shoulder,
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.50f, size.height * 0.52f),
+            end = Offset(size.width * 0.26f, size.height * 0.66f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.54f, size.height * 0.60f),
+            end = point,
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
     }
 }
 
@@ -1162,3 +1710,4 @@ private val AgentPanelActive = Color(0xFF2A2A2A)
 private val BlueprintGray = Color(0xFF545454)
 private val AgentMuted = Color(0xFFA8A8A8)
 private val AgentWhite = Color.White
+private const val SYSTEM_NOTIFICATION_AUTO_DISMISS_MS = 20_000L

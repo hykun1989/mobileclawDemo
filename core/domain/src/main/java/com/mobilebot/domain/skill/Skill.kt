@@ -78,6 +78,7 @@ data class SkillManifest(
     // --- Content ---
     val promptSummary: String = description,
     val promptBody: String? = null,
+    val references: List<String> = emptyList(),
 
 ) {
     val effectiveAllowedTools: List<String>

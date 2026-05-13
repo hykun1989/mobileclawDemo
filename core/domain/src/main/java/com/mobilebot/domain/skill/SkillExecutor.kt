@@ -47,9 +47,11 @@ class SkillExecutor @Inject constructor(
             entry.manifest.promptBody ?: entry.manifest.description
         }
 
+        val bodyWithReferences = appendReferenceMaterials(entry, body)
+
         return when (entry.manifest.context) {
-            SkillContext.FORK -> executeFork(entry, body, task, depth)
-            SkillContext.INLINE -> executeInline(entry, body, task)
+            SkillContext.FORK -> executeFork(entry, bodyWithReferences, task, depth)
+            SkillContext.INLINE -> executeInline(entry, bodyWithReferences, task)
         }
     }
 
@@ -119,6 +121,43 @@ class SkillExecutor @Inject constructor(
             .put("allowedTools", JSONArray(manifest.effectiveAllowedTools))
             .put("allowSkillSwitching", manifest.composesSkills.isNotEmpty())
             .toString()
+
+    private suspend fun appendReferenceMaterials(entry: SkillEntry, body: String): String {
+        val references = entry.manifest.references
+        if (references.isEmpty()) return body
+
+        // 参考资料跟随 Skill 一起进入提示词，避免场景数据散落到核心层。
+        val loadedReferences = references.map { reference ->
+            val path = resolveReferencePath(entry.contentPath, reference)
+            val content = contentLoader.loadContent(path)
+            buildString {
+                appendLine("### $reference")
+                appendLine()
+                if (content.isNullOrBlank()) {
+                    appendLine("Reference file could not be loaded: $reference")
+                } else {
+                    appendLine(content.trim())
+                }
+            }.trimEnd()
+        }
+
+        return buildString {
+            append(body)
+            appendLine()
+            appendLine()
+            appendLine("## Reference Materials")
+            loadedReferences.forEach { block ->
+                appendLine()
+                appendLine(block)
+            }
+        }.trimEnd()
+    }
+
+    private fun resolveReferencePath(contentPath: String, reference: String): String {
+        if (reference.startsWith("assets://") || reference.startsWith("/")) return reference
+        val basePath = contentPath.substringBeforeLast('/', missingDelimiterValue = "")
+        return if (basePath.isBlank()) reference else "$basePath/$reference"
+    }
 
     private fun buildSkillPrompt(manifest: SkillManifest, body: String, task: String): String {
         return buildString {

@@ -1,4 +1,4 @@
-{
+﻿{
   "contacts": [
     {
       "id": "owner-Y",
@@ -50,15 +50,63 @@
     },
     {
       "id": "family-contact",
-      "displayName": "Family Contact",
-      "relation": "family",
+      "displayName": "Ella",
+      "relation": "spouse",
       "phone": "13800003333",
-      "aliases": ["family", "home contact", "家人"],
+      "aliases": ["Ella", "老婆", "太太", "family", "home contact", "家人"],
       "channels": ["sms", "phone"],
-      "capabilities": ["home_confirmation", "backup_contact"],
-      "messageKeywords": ["family", "home contact", "backup", "家人"],
+      "capabilities": ["family_task", "home_confirmation", "backup_contact"],
+      "messageKeywords": ["Ella", "family", "home contact", "shopping", "backup", "老婆", "家人", "采购"],
       "trustLevel": "high",
-      "note": "Backup home contact."
+      "note": "Y's spouse. Household errands from Ella should become low-interruption task tracking."
+    },
+    {
+      "id": "market-ole",
+      "displayName": "Ole",
+      "relation": "grocery_service",
+      "phone": "13800006666",
+      "aliases": ["Ole", "Ole Supermarket", "附近超市", "超市", "商超"],
+      "channels": ["notification", "sms"],
+      "capabilities": ["grocery", "delivery", "product_search"],
+      "messageKeywords": ["Ole", "milk", "detergent", "fruit", "低脂牛奶", "洗衣液", "水果", "配送"],
+      "trustLevel": "medium",
+      "note": "Preferred grocery option near Y's home."
+    },
+    {
+      "id": "property-service",
+      "displayName": "物业管家",
+      "relation": "property_service",
+      "phone": "13800007777",
+      "aliases": ["物业", "物业管家", "Property"],
+      "channels": ["notification", "sms"],
+      "capabilities": ["building_notice", "parking", "delivery"],
+      "messageKeywords": ["物业", "车库", "快递柜", "取件", "临停"],
+      "trustLevel": "medium",
+      "note": "Building service contact for pickup, parking, and delivery notices."
+    },
+    {
+      "id": "pharmacy-service",
+      "displayName": "美团买药",
+      "relation": "pharmacy_service",
+      "phone": "13800008888",
+      "aliases": ["美团买药", "Pharmacy", "药店"],
+      "channels": ["notification", "sms"],
+      "capabilities": ["health_supply", "delivery"],
+      "messageKeywords": ["益生菌", "补货", "药店", "健康"],
+      "trustLevel": "medium",
+      "note": "Routine health supply service."
+    },
+    {
+      "id": "courier-coldchain",
+      "displayName": "顺丰冷链",
+      "relation": "delivery_service",
+      "phone": "13800009999",
+      "aliases": ["顺丰", "顺丰冷链", "SF Express", "冷链"],
+      "channels": ["notification", "sms"],
+      "capabilities": ["delivery", "cold_chain"],
+      "messageKeywords": ["顺丰", "冷链", "快递", "包裹", "签收"],
+      "trustLevel": "medium",
+      "note": "Cold-chain delivery contact for household packages."
     },
     {
       "id": "vet-clinic",

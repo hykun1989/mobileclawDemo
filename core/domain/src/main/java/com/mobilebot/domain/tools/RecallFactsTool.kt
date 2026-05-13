@@ -18,10 +18,10 @@ class RecallFactsTool
             ToolDefinition(
                 name = name,
                 description = "Search durable facts previously stored in the local memory database. " +
-                    "Use before asking the user for information that may already be known, such as pet names, " +
-                    "last grooming dates, pet food inventory, preferences, and prior purchases.",
+                    "Use before asking the user for information that may already be known, such as names, " +
+                    "recent service dates, household inventory, preferences, and prior purchases.",
                 parametersSchema =
-                    """{"type":"object","properties":{"query":{"type":"string","description":"Search text, e.g. pet, dog_food, 元宝, last_grooming"},"limit":{"type":"integer","description":"Maximum facts to return, default 5"}},"required":["query"]}""",
+                    """{"type":"object","properties":{"query":{"type":"string","description":"Search text for known user facts."},"limit":{"type":"integer","description":"Maximum facts to return, default 5"}},"required":["query"]}""",
             )
 
         override val risk = ToolRisk.LOW

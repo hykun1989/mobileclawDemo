@@ -33,6 +33,10 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
     implementation(project(":core:network"))
+    implementation(project(":core:systemruntime"))
+    implementation(project(":scenarios:pet-grooming"))
+    implementation(project(":scenarios:runtime"))
+    implementation(project(":scenarios:one-hour-flow"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

@@ -18,10 +18,10 @@ class RememberFactTool
             ToolDefinition(
                 name = name,
                 description = "Persist a durable user or domain fact in the local memory database. " +
-                    "Use for stable facts the assistant should remember later, such as pet names, " +
-                    "last grooming dates, pet food inventory, purchased products, preferences, and IDs.",
+                    "Use for stable facts the assistant should remember later, such as names, " +
+                    "recent service dates, household inventory, purchased products, preferences, and IDs.",
                 parametersSchema =
-                    """{"type":"object","properties":{"namespace":{"type":"string","description":"Fact namespace, e.g. pets, pet_inventory, preferences"},"key":{"type":"string","description":"Stable fact key, e.g. pet.yuanyuan.name or pet.yuanyuan.last_grooming_at"},"value":{"type":"string","description":"Fact value as concise text or JSON"},"confidence":{"type":"number","description":"Confidence from 0 to 1, defaults to 1"}},"required":["namespace","key","value"]}""",
+                    """{"type":"object","properties":{"namespace":{"type":"string","description":"Fact namespace, e.g. preferences, household_inventory, service_history"},"key":{"type":"string","description":"Stable fact key."},"value":{"type":"string","description":"Fact value as concise text or JSON"},"confidence":{"type":"number","description":"Confidence from 0 to 1, defaults to 1"}},"required":["namespace","key","value"]}""",
             )
 
         override val risk = ToolRisk.LOW

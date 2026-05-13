@@ -1,4 +1,4 @@
-package com.mobilebot.chat
+﻿package com.mobilebot.chat
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -7,8 +7,36 @@ import com.mobilebot.bus.MessageBus
 import com.mobilebot.data.settings.UserSettingsRepository
 import com.mobilebot.domain.AgentLoop
 import com.mobilebot.domain.ForegroundController
+import com.mobilebot.domain.agent.AgentDecisionAction
+import com.mobilebot.domain.agent.AgentSessionInput
+import com.mobilebot.domain.agent.AgentSessionRoute
+import com.mobilebot.domain.agent.AgentDecisionInput
+import com.mobilebot.domain.agent.AgentDecisionIntent
+import com.mobilebot.domain.agent.AgentDecisionIntentNormalizer
 import com.mobilebot.domain.interaction.ActionPromptCodec
 import com.mobilebot.domain.todo.TodoListCodec
+import com.mobilebot.scenarios.onehour.OneHourFlowEffect
+import com.mobilebot.scenarios.onehour.OneHourScenarioPolicy
+import com.mobilebot.scenarios.onehour.OneHourScenarioFlow
+import com.mobilebot.scenarios.onehour.OneHourScenarioRunTracker
+import com.mobilebot.scenarios.runtime.ScenarioConversation
+import com.mobilebot.scenarios.runtime.ScenarioDecision
+import com.mobilebot.scenarios.runtime.ScenarioLog
+import com.mobilebot.scenarios.runtime.ScenarioParticipant
+import com.mobilebot.scenarios.runtime.ScenarioProgress
+import com.mobilebot.scenarios.runtime.ScenarioSurfaceRole
+import com.mobilebot.scenarios.runtime.ScenarioSurfaceStatus
+import com.mobilebot.scenarios.runtime.ScenarioTaskSeed
+import com.mobilebot.scenarios.runtime.ScenarioTaskUpdate
+import com.mobilebot.scenarios.runtime.ScenarioTimeline
+import com.mobilebot.systemruntime.CallEndedEvent
+import com.mobilebot.systemruntime.IncomingCallEvent
+import com.mobilebot.systemruntime.IncomingSmsEvent
+import com.mobilebot.systemruntime.ReminderFiredEvent
+import com.mobilebot.systemruntime.RuntimeNotificationEvent
+import com.mobilebot.systemruntime.SystemRuntime
+import com.mobilebot.systemruntime.SystemRuntimeEvent
+import com.mobilebot.systemruntime.SystemRuntimeScriptEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -21,6 +49,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
@@ -34,47 +63,40 @@ class AgentExperienceViewModel
         private val agent: AgentLoop,
         private val settings: UserSettingsRepository,
         private val foreground: ForegroundController,
-        private val decisionIntentNormalizer: ScenarioDecisionIntentNormalizer,
+        private val decisionIntentNormalizer: AgentDecisionIntentNormalizer,
+        private val systemRuntime: SystemRuntime,
     ) : ViewModel() {
         private var currentChatId: String? = null
         private var eventCounter = 0
         private var continuationCount = 0
         private var scenarioClock = INITIAL_SCENARIO_CLOCK
         private var deferredRetriggerInProgress = false
-        private var latestScenarioDecisionIntent: ScenarioDecisionIntent? = null
+        private var latestAgentDecisionIntent: AgentDecisionIntent? = null
         private var pendingSelectedActionLabel: String? = null
-        private var lastGroomingPaymentAmount: String? = null
         private var awaitingInitialPrecheckDecision = false
-        private var activeGroomingDate = INITIAL_SCENARIO_CLOCK.toLocalDate().plusDays(1)
-        private val groomingMilestones = mutableSetOf<GroomingMilestone>()
+        private var activeServiceDate = INITIAL_SCENARIO_CLOCK.toLocalDate().plusDays(1)
+        private var clockMode = ScenarioClockMode.Live
+        private var normalClockElapsedMs = 0L
+        private var taskSortCounter = 0L
+        private val deliveredTimelineEvents = mutableSetOf<String>()
+        private val taskStates = linkedMapOf<String, AgentTaskState>()
+        private val taskSessionIds = mutableMapOf<String, String>()
+        private val pinnedTaskIds = linkedSetOf<String>()
+        private val scenarioRunTracker = OneHourScenarioRunTracker()
+        private val oneHourFlow = OneHourScenarioFlow()
+        // 系统事件只负责投放外部事实，具体任务编排由 Agent 处理。
+        private val timelineScript: List<ScenarioTimelineEvent> by lazy {
+            systemRuntime.scenarioEvents(ONE_HOUR_SCENARIO_ID)
+                .mapNotNull { it.toScenarioTimelineEvent(INITIAL_SCENARIO_CLOCK) }
+        }
 
+        private val scenarioSpec = OneHourScenarioPolicy.config()
         private val scenario = AgentScenarioConfig(
-            scenarioId = "pet-grooming",
-            title = "Kylin Grooming Assistant",
-            skillName = "pet-grooming",
-            expectedSignals = listOf(
-                "User profile, places, and preferences are available.",
-                "Service messages can be sent and received.",
-                "Home, route, and salon locations are ready.",
-                "Driver and salon contacts are available.",
-                "Progress updates can be delivered quietly.",
-            ),
-            triggerText = """
-                Start the `pet-grooming` scenario skill as the scheduled Saturday precheck for Kylin's recurring grooming.
-                Use the current scenario clock supplied by the runtime. Treat the next day as the grooming date unless a trusted system result gives a more specific date.
-                All user-facing assistant messages, action candidates, plan titles, plan steps, SMS bodies, reminders, notifications, payment descriptions, and accounting descriptions must be Chinese. Proper nouns such as PetSmart, Driver, Kylin, CNY, and NT may stay as written. Do not write English prose on user-facing surfaces.
-                Invoke `use_skill` with skill_name `pet-grooming`, begin at the weekly precheck decision point, then load user memory, create a concise plan, resolve Y's preferred grooming shop PetSmart through device_system service_call with serviceId `pet_salon_search` and query `PetSmart`, consider another shop only if PetSmart cannot satisfy the requested timing or service scope, use system_send_sms and system_wait_for_sms for SMS conversations, and use device_system for remaining phone and OS capabilities.
-                After Y keeps the appointment, call device_system service_call with serviceId `pet_salon_search` and action `get_pet_shop_detail` before sending any SMS to PetSmart. Use the service result for shop identity, address, contact details, service items, and published prices. Kylin is an extra-large Bernese Mountain Dog; use the published service price for Kylin's selected size and service scope as the expected fee for payment/accounting. Do not use full grooming/styling price, small-dog pricing, or pickup coordination fees unless the selected scope changes. Confirm available times, final service scope, and booking status by SMS with PetSmart. Never ask PetSmart for final price in the normal path, and do not include prices, totals, fee details, or CNY in normal PetSmart SMS.
-                The first PetSmart SMS after Y keeps this week must ask for the regular Sunday 14:00 bath plus de-shedding slot. Do not ask for 9:00, 17:00, or broad morning/afternoon alternatives in that first PetSmart SMS; those alternatives should come from PetSmart's reply.
-                A PetSmart message that a time is available is not the final booking confirmation. After Y chooses the 9:00 option, the next operational step is only: send PetSmart a confirmation SMS for that slot, then call system_wait_for_sms for PetSmart's booking confirmation. Do not call system_send_sms for Driver until PetSmart's inbound booking-confirmed SMS exists in history.
-                If Y chooses another shop and Harbor Paws Salon is selected for the original 14:00 bath plus de-shedding slot, do not reuse PetSmart's 8:30/9:00 timing. Confirm the 14:00 Harbor Paws Salon booking by SMS first, then coordinate Driver for 13:30 home pickup and arrival at Harbor Paws Salon by 14:00.
-                Do not resolve or message Driver until the selected grooming shop has confirmed the final booking slot by inbound SMS. Driver is Y's private driver: for a 9:00 PetSmart appointment, coordinate Driver to pick Kylin up from Y's home at 8:30 and deliver him to PetSmart by 9:00; for an accepted afternoon bath-only slot after 17:00, coordinate Driver to pick Kylin up at exactly 16:30 and deliver him to PetSmart by 17:00; for a 14:00 Harbor Paws Salon appointment, coordinate Driver to pick Kylin up at 13:30 and deliver him to Harbor Paws Salon by 14:00. The afternoon first Driver SMS must explicitly say `16:30 到家接 Kylin，17:00 前送到 PetSmart`; do not write `下午5点前到家接`. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in this first Driver SMS. After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports; the next listener must be system_wait_for_sms from Driver for Driver's delivery-to-shop update. Do not wait on the selected shop for arrival or progress until Driver has reported Kylin was delivered to that shop. Ask Driver to pick up from the selected shop only after that shop says Kylin is finished, ready, or gives a revised pickup time after a delay.
-                After the selected grooming shop confirms the booking, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar Y-facing greetings.
-                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected next-day departure time with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-shop update for <selected shop name>" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-shop.
-                After Y answers a declared decision point, continue through routine downstream actions without asking again: booking confirmation, driver home pickup coordination, reminders, Driver delivery-to-shop monitoring, selected-shop progress/finish monitoring, Driver return coordination, home confirmation, payment, accounting, and final summary. Pause only at declared decision points or real blockers, and finish only after Kylin is confirmed home, payment is complete, and the expense is recorded. Do not ask Y whether to create routine reminders. For home confirmation, send Driver a short SMS asking him to confirm once Kylin is home, then wait on that returned SMS listener. Do not pay before an inbound Driver SMS explicitly confirms home arrival. Selected-shop progress and finish updates must be listened from the selected shop, not delegated to Driver.
-                If Y selects a concrete grooming time or service option, treat that as confirmation to proceed with that option. Do not ask for a second confirmation of the same choice.
-                Do not end with a promise to monitor later while the workflow is still open. If the next step is monitoring, immediately call system_wait_for_sms for the next expected PetSmart or Driver signal.
-            """.trimIndent(),
+            scenarioId = scenarioSpec.scenarioId,
+            title = scenarioSpec.title,
+            skillName = scenarioSpec.skillName,
+            expectedSignals = scenarioSpec.expectedSignals,
+            triggerText = scenarioSpec.triggerText,
         )
 
         private val _frame = MutableStateFlow(AgentExperienceFrame.initial(scenario))
@@ -90,17 +112,23 @@ class AgentExperienceViewModel
                 }
             }
             viewModelScope.launch {
-                delay(AUTO_TRIGGER_DELAY_MS)
-                if (!_frame.value.hasStarted && !_frame.value.busy) {
-                    startScenario()
+                systemRuntime.events.collect { event ->
+                    handleSystemRuntimeEvent(event)
                 }
             }
             viewModelScope.launch {
                 while (true) {
-                    delay(SCENARIO_CLOCK_TICK_MS)
+                    delay(CLOCK_LOOP_INTERVAL_MS)
                     tickScenarioClock()
                 }
             }
+        }
+
+        fun accelerateClockUntilNextEvent() {
+            if (deferredRetriggerInProgress) return
+            clockMode = ScenarioClockMode.FastUntilNextEvent
+            normalClockElapsedMs = 0L
+            _frame.update { it.copy(clockMode = clockMode) }
         }
 
         fun startScenario() {
@@ -108,21 +136,19 @@ class AgentExperienceViewModel
             if (_frame.value.hasStarted && _frame.value.error == null && _frame.value.finalSummary == null) return
             val runChatId = "run-${scenario.scenarioId}-${UUID.randomUUID().toString().take(8)}"
             currentChatId = runChatId
-            activeGroomingDate = scenarioClock.toLocalDate().plusDays(1)
+            activeServiceDate = scenarioClock.toLocalDate().plusDays(1)
             eventCounter = 0
             continuationCount = 0
-            latestScenarioDecisionIntent = null
+            latestAgentDecisionIntent = null
             pendingSelectedActionLabel = null
-            lastGroomingPaymentAmount = null
             awaitingInitialPrecheckDecision = true
-            groomingMilestones.clear()
+            taskSessionIds.clear()
+            scenarioRunTracker.clear()
             val baseFrame = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
+            val precheckDecision = OneHourScenarioPolicy.precheckDecision()
             val precheckPrompt = DecisionPrompt(
-                text = "明天周日了，还是照常给麒麟约洗澡么？",
-                actions = listOf(
-                    ActionButton("好的", "USER_INTENT:pet_grooming.keep_current_week"),
-                    ActionButton("改天再说", "USER_INTENT:pet_grooming.defer_current_week"),
-                ),
+                text = precheckDecision.text,
+                actions = precheckDecision.actions.map { ActionButton(it.label, it.key) },
             )
             _frame.value = baseFrame.copy(
                 statusLabel = "Waiting for decision",
@@ -151,27 +177,107 @@ class AgentExperienceViewModel
         }
 
         fun chooseDecision(action: ActionButton) {
-            val chatId = currentChatId ?: return
-            if (_frame.value.busy) return
-            continueWithNormalizedDecision(
-                chatId = chatId,
-                displayText = action.label,
-                rawText = action.value,
-                selectedActionValue = action.value,
+            handleSessionInput(
+                AgentSessionInput.ActionSelected(
+                    route = currentSessionRoute(),
+                    action = action.toAgentDecisionAction(),
+                ),
             )
         }
 
         fun submitDecisionText(text: String) {
-            val value = text.trim()
-            if (value.isBlank()) return
-            val chatId = currentChatId ?: return
-            if (_frame.value.busy) return
-            continueWithNormalizedDecision(
-                chatId = chatId,
-                displayText = value,
-                rawText = value,
-                selectedActionValue = null,
+            handleSessionInput(
+                AgentSessionInput.TextSubmitted(
+                    route = currentSessionRoute(),
+                    text = text,
+                ),
             )
+        }
+
+        private fun handleSessionInput(input: AgentSessionInput) {
+            when (input) {
+                is AgentSessionInput.ActionSelected -> {
+                    if (_frame.value.busy) return
+                    val action = input.action
+                    if (action.value.startsWith(SCRIPTED_ACTION_PREFIX)) {
+                        handleLocalScenarioDecision(
+                            displayText = action.label,
+                            rawText = action.value,
+                            selectedActionValue = action.value,
+                        )
+                        return
+                    }
+                    val chatId = input.route.sessionId ?: return
+                    continueWithNormalizedDecision(
+                        chatId = chatId,
+                        displayText = action.label,
+                        rawText = action.value,
+                        selectedActionValue = action.value,
+                    )
+                }
+                is AgentSessionInput.TextSubmitted -> {
+                    val value = input.text.trim()
+                    if (value.isBlank() || _frame.value.busy) return
+                    if (_frame.value.decisionPrompt?.actions.orEmpty().any { it.value.startsWith(SCRIPTED_ACTION_PREFIX) }) {
+                        handleLocalScenarioDecision(
+                            displayText = value,
+                            rawText = value,
+                            selectedActionValue = null,
+                        )
+                        return
+                    }
+                    val chatId = input.route.sessionId ?: return
+                    continueWithNormalizedDecision(
+                        chatId = chatId,
+                        displayText = value,
+                        rawText = value,
+                        selectedActionValue = null,
+                    )
+                }
+            }
+        }
+
+        private fun currentSessionRoute(): AgentSessionRoute =
+            _frame.value.activeTaskId.let { activeTaskId ->
+                val sessionId = sessionIdForTask(activeTaskId)
+                AgentSessionRoute(
+                    sessionId = sessionId,
+                    taskId = activeTaskId,
+                )
+            }
+
+        private fun sessionIdForTask(taskId: String?): String {
+            val sessionId = if (taskId == null) {
+                currentChatId ?: "run-${scenario.scenarioId}-${UUID.randomUUID().toString().take(8)}"
+            } else {
+                // 每个任务拥有独立 Agent 上下文，避免多任务互相污染。
+                taskSessionIds.getOrPut(taskId) {
+                    "task-$taskId-${UUID.randomUUID().toString().take(8)}"
+                }
+            }
+            currentChatId = sessionId
+            return sessionId
+        }
+
+        fun selectTask(taskId: String) {
+            val task = taskStates[taskId] ?: return
+            taskStates[_frame.value.activeTaskId]?.let {
+                taskStates[it.id] = _frame.value.captureTaskState(it)
+            }
+            // 查看任务不改变任务活跃顺序，只有真实事件更新才刷新排序。
+            currentChatId = taskSessionIds[taskId]
+            _frame.update { task.applyToFrame(it) }
+        }
+
+        fun toggleTaskPinned(taskId: String) {
+            if (taskId in pinnedTaskIds) {
+                pinnedTaskIds.remove(taskId)
+            } else {
+                pinnedTaskIds.add(taskId)
+            }
+            _frame.update { frame ->
+                frame.copy(taskCards = taskCardsFor(activeId = frame.activeTaskId))
+            }
         }
 
         private fun continueWithNormalizedDecision(
@@ -218,26 +324,27 @@ class AgentExperienceViewModel
             }
             viewModelScope.launch {
                 val normalized = decisionIntentNormalizer.normalize(
-                    ScenarioDecisionInput(
-                        scenarioId = scenario.scenarioId,
+                    AgentDecisionInput(
+                        contextId = scenario.scenarioId,
                         promptText = prompt?.text.orEmpty(),
-                        presentedActions = prompt?.actions.orEmpty(),
+                        presentedActions = prompt?.actions.orEmpty().map { it.toAgentDecisionAction() },
+                        candidateIntents = OneHourScenarioPolicy.decisionIntents(scenario.scenarioId),
                         displayText = displayText,
                         rawText = rawText,
                     ),
                 )
                 val initialPrecheckDecision = awaitingInitialPrecheckDecision
                 awaitingInitialPrecheckDecision = false
-                latestScenarioDecisionIntent = normalized.intent
+                latestAgentDecisionIntent = normalized.intent
                 _frame.update {
                     val initialTaskLog =
                         if (initialPrecheckDecision &&
-                            normalized.intent == ScenarioDecisionIntent.PetGroomingKeepCurrentWeek
+                            OneHourScenarioPolicy.isKeepCurrentWeek(normalized.intent)
                         ) {
                             AgentTaskLog(
                                 id = nextId("task"),
                                 timeText = blueprintTimeText(scenarioClock),
-                                text = "创建麒麟日常洗护任务。",
+                                text = OneHourScenarioPolicy.initialTaskLogText(),
                             )
                         } else {
                             null
@@ -258,18 +365,17 @@ class AgentExperienceViewModel
                 }
                 if (
                     initialPrecheckDecision &&
-                    normalized.intent == ScenarioDecisionIntent.PetGroomingDeferCurrentWeek
+                    OneHourScenarioPolicy.isDeferCurrentWeek(normalized.intent)
                 ) {
-                    completeDeferredGroomingRun()
+                    completeDeferredScenarioRun()
                     return@launch
                 }
                 val agentText =
                     if (initialPrecheckDecision) {
                         """
-                            ${buildScenarioTriggerText(scenarioClock)}
+                            ${OneHourScenarioPolicy.triggerText(scenarioClock)}
 
-                            Y already answered the weekly precheck decision. Authoritative decision: ${normalized.agentText}
-                            Do not ask the weekly precheck question again. If Y keeps this week, continue booking and coordination from that decision. If Y defers this week, acknowledge briefly and stop this run without contacting PetSmart or Driver.
+                            ${OneHourScenarioPolicy.initialDecisionInstruction(normalized.agentText)}
                         """.trimIndent()
                     } else {
                         normalized.agentText
@@ -278,8 +384,8 @@ class AgentExperienceViewModel
             }
         }
 
-        private fun completeDeferredGroomingRun() {
-            val message = "好的，那下周再说。"
+        private fun completeDeferredScenarioRun() {
+            val message = OneHourScenarioPolicy.deferredCompletionMessage()
             _frame.update {
                 val visibleBase = it.withPendingSelectedAction()
                 visibleBase.copy(
@@ -315,6 +421,7 @@ class AgentExperienceViewModel
 
         private suspend fun runAgentTurn(chatId: String, text: String) {
             try {
+                currentChatId = chatId
                 if (settings.getApiKey().isBlank()) {
                     _frame.update {
                         it.withPendingSelectedAction().copy(
@@ -372,7 +479,7 @@ class AgentExperienceViewModel
                                 busy = false,
                                 statusLabel = "Needs attention",
                                 finalSummary = null,
-                                error = "The grooming workflow stopped before closure.",
+                                error = OneHourScenarioPolicy.workflowStoppedError(),
                                 decisionPrompt = null,
                                 activeActionValue = null,
                                 progressLine = AgentProgressLine(
@@ -399,17 +506,17 @@ class AgentExperienceViewModel
                             finalSummary = null,
                             progressLine = AgentProgressLine(
                                 label = "Continuing",
-                                detail = "Advancing to the next missing grooming milestone.",
+                                detail = OneHourScenarioPolicy.nextMilestoneDetail(),
                                 completed = completedStageCount(it),
                                 total = totalStageCount(it),
                             ),
                             timeline = it.timeline + AgentTimelineEvent(
                                 id = nextId("guard"),
                                 title = "Workflow continuing",
-                                detail = "The grooming flow remains open until home confirmation, payment, and accounting are complete.",
+                                detail = OneHourScenarioPolicy.closureRequiredDetail(),
                                 status = AgentTimelineStatus.RUNNING,
                             ),
-                            debugTrace = appendTrace(it.debugTrace, "continuation -> grooming workflow remains open"),
+                            debugTrace = appendTrace(it.debugTrace, OneHourScenarioPolicy.continuationTrace()),
                         )
                     }
                     runAgentTurn(chatId, continuationPrompt)
@@ -436,82 +543,32 @@ class AgentExperienceViewModel
             }
         }
 
-        private fun buildScenarioTriggerText(clock: LocalDateTime): String {
-            val precheckDate = clock.toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val groomingDate = clock.toLocalDate().plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val morningReminder = clock.toLocalDate().plusDays(1).atTime(8, 30).format(BLUEPRINT_TIME_FORMATTER)
-            val afternoonReminder = clock.toLocalDate().plusDays(1).atTime(16, 30).format(BLUEPRINT_TIME_FORMATTER)
-            val dayName = scenarioDayName(clock, full = true)
-            val groomingDayName = scenarioDayName(clock.plusDays(1), full = true)
-            val time = clock.toLocalTime().format(CLOCK_TIME_FORMATTER)
-            return """
-                Start the `pet-grooming` scenario skill as the scheduled Saturday precheck for Kylin's recurring grooming.
-                Current scenario clock: $dayName $precheckDate $time for precheck, with grooming expected on $groomingDayName $groomingDate. Do not invent another date. Use $groomingDate as the payment and accounting date for this run.
-                All user-facing assistant messages, action candidates, plan titles, plan steps, SMS bodies, reminders, notifications, payment descriptions, and accounting descriptions must be Chinese. Proper nouns such as PetSmart, Driver, Kylin, CNY, and NT may stay as written. Do not write English prose on user-facing surfaces.
-                Invoke `use_skill` with skill_name `pet-grooming`, begin at the weekly precheck decision point, then load user memory, create a concise plan, resolve Y's preferred grooming shop PetSmart through device_system service_call with serviceId `pet_salon_search` and query `PetSmart`, consider another shop only if PetSmart cannot satisfy the requested timing or service scope, use system_send_sms and system_wait_for_sms for SMS conversations, and use device_system for remaining phone and OS capabilities.
-                After Y keeps the appointment, call device_system service_call with serviceId `pet_salon_search` and action `get_pet_shop_detail` before sending any SMS to PetSmart. Use the service result for shop identity, address, contact details, service items, and published prices. Kylin is an extra-large Bernese Mountain Dog; use the published service price for Kylin's selected size and service scope as the expected fee for payment/accounting. Do not use full grooming/styling price, small-dog pricing, or pickup coordination fees unless the selected scope changes. Confirm available times, final service scope, and booking status by SMS with PetSmart. Never ask PetSmart for final price in the normal path, and do not include prices, totals, fee details, or CNY in normal PetSmart SMS.
-                The first PetSmart SMS after Y keeps this week must ask for the regular Sunday 14:00 bath plus de-shedding slot. Do not ask for 9:00, 17:00, or broad morning/afternoon alternatives in that first PetSmart SMS; those alternatives should come from PetSmart's reply.
-                A PetSmart message that a time is available is not the final booking confirmation. After Y chooses the 9:00 option, the next operational step is only: send PetSmart a confirmation SMS for that slot, then call system_wait_for_sms for PetSmart's booking confirmation. Do not call system_send_sms for Driver until PetSmart's inbound booking-confirmed SMS exists in history.
-                If Y chooses another shop and Harbor Paws Salon is selected for the original 14:00 bath plus de-shedding slot, do not reuse PetSmart's 8:30/9:00 timing. Confirm the 14:00 Harbor Paws Salon booking by SMS first, then coordinate Driver for 13:30 home pickup and arrival at Harbor Paws Salon by 14:00.
-                Do not resolve or message Driver until the selected grooming shop has confirmed the final booking slot by inbound SMS. Driver is Y's private driver: for a 9:00 PetSmart appointment, coordinate Driver to pick Kylin up from Y's home at 8:30 and deliver him to PetSmart by 9:00; for an accepted afternoon bath-only slot after 17:00, coordinate Driver to pick Kylin up at exactly 16:30 and deliver him to PetSmart by 17:00; for a 14:00 Harbor Paws Salon appointment, coordinate Driver to pick Kylin up at 13:30 and deliver him to Harbor Paws Salon by 14:00. The afternoon first Driver SMS must explicitly say `16:30 到家接 Kylin，17:00 前送到 PetSmart`; do not write `下午5点前到家接`. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in this first Driver SMS. After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports; the next listener must be system_wait_for_sms from Driver for Driver's delivery-to-shop update. Do not wait on the selected shop for arrival or progress until Driver has reported Kylin was delivered to that shop. Ask Driver to pick up from the selected shop only after that shop says Kylin is finished, ready, or gives a revised pickup time after a delay.
-                After the selected grooming shop confirms the booking, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar Y-facing greetings.
-                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected grooming-day departure time ($morningReminder for a 9:00 appointment, or $afternoonReminder for an afternoon 17:00 appointment) with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-shop update for <selected shop name>" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-shop.
-                After Y answers a declared decision point, continue through routine downstream actions without asking again: booking confirmation, driver home pickup coordination, reminders, Driver delivery-to-shop monitoring, selected-shop progress/finish monitoring, Driver return coordination, home confirmation, payment, accounting, and final summary. Pause only at declared decision points or real blockers, and finish only after Kylin is confirmed home, payment is complete, and the expense is recorded. Do not ask Y whether to create routine reminders. For home confirmation, send Driver a short SMS asking him to confirm once Kylin is home, then wait on that returned SMS listener. Do not pay before an inbound Driver SMS explicitly confirms home arrival. Selected-shop progress and finish updates must be listened from the selected shop, not delegated to Driver.
-                If Y selects a concrete grooming time or service option, treat that as confirmation to proceed with that option. Do not ask for a second confirmation of the same choice.
-                Do not end with a promise to monitor later while the workflow is still open. If the next step is monitoring, immediately call system_wait_for_sms for the next expected PetSmart or Driver signal.
-                Do not send user-facing prose about loading memory, creating a plan, tool usage, or decision point ids. The first user-facing message should be only the weekly grooming precheck question with short action candidates.
-            """.trimIndent()
-        }
-
         private fun continuationPromptFor(frame: AgentExperienceFrame): String? {
-            if (frame.scenario.scenarioId != "pet-grooming") return null
+            if (!OneHourScenarioPolicy.matches(frame.scenario.scenarioId)) return null
             if (frame.decisionPrompt != null || frame.error != null) return null
             if (frame.finalSummary.isNullOrBlank()) return null
-            if (groomingDeferred(frame)) return null
-            if (groomingClosureSatisfied(frame)) return null
-            return groomingContinuationPrompt()
+            if (scenarioDeferred(frame)) return null
+            if (scenarioClosureSatisfied(frame)) return null
+            return scenarioContinuationPrompt()
         }
 
-        private fun groomingContinuationPrompt(): String {
-            val paymentDate = activeGroomingDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val morningReminder = activeGroomingDate.atTime(8, 30).format(BLUEPRINT_TIME_FORMATTER)
-            val afternoonReminder = activeGroomingDate.atTime(16, 30).format(BLUEPRINT_TIME_FORMATTER)
-            val selectedShop = selectedGroomingShopName()
-            return """
-                Continue the pet-grooming workflow from the next missing operational milestone. The previous assistant answer stopped before closure.
-                Do not summarize, audit, or explain the history in prose. Start by calling the next needed tool.
-                All user-facing assistant messages, action candidates, plan titles, plan steps, SMS bodies, reminders, notifications, payment descriptions, and accounting descriptions must be Chinese. Proper nouns such as PetSmart, Driver, Kylin, CNY, and NT may stay as written. Do not write English prose on user-facing surfaces.
-                Continue in this order, choosing the first missing milestone only: $selectedShop booking confirmation; Driver home-pickup confirmation; Driver delivery-to-shop update from Driver; $selectedShop arrival/progress/finish update; Driver pickup-from-shop and return update; Driver home confirmation; payment; accounting; one short final status.
-                If Y selected the 9:00 option and $selectedShop has not yet replied with a booking-confirmed SMS, the next tool must be a $selectedShop confirmation SMS or a $selectedShop wait. Do not message Driver in that state.
-                Driver is Y's private driver. For a 9:00 $selectedShop appointment, the first Driver leg is 8:30 home pickup, then arrival at $selectedShop by 9:00. For an accepted afternoon bath-only slot after 17:00, the first Driver SMS must explicitly say 16:30 home pickup and arrival at $selectedShop by 17:00; do not ask Driver to pick up at 17:00 or say only "before 17:00". For a 14:00 Harbor Paws Salon appointment, the first Driver SMS must explicitly say 13:30 home pickup and arrival at Harbor Paws Salon by 14:00. $selectedShop progress, delay, revised pickup time, and finish must come from $selectedShop. The second Driver leg is $selectedShop to home only after $selectedShop reports Kylin is finished, ready, or gives a revised pickup time after a delay.
-                The first Driver SMS must only cover the selected appointment's home pickup and $selectedShop delivery. Do not include a predicted grooming finish time, return pickup time, or home-arrival instruction in that first Driver SMS.
-                After $selectedShop confirms the selected slot, contact Driver directly without asking Y again. Driver SMS is addressed to Driver; start it with `司机您好` or `您好`, never `Y您好` or similar user-facing greetings.
-                After sending the first Driver SMS, first wait for Driver's home-pickup confirmation using that SMS listener. A reply such as "收到，我8:30来接 Kylin" satisfies only pickup confirmation, not delivery. After Driver confirms the pickup plan, create a long_reminder for the selected grooming-day departure time ($morningReminder for a 9:00 appointment, $afternoonReminder for an afternoon 17:00 appointment, or 13:30 for a 14:00 Harbor Paws Salon appointment) with a Chinese title like `麒麟出发洗澡`; this is reminder creation and must not be treated as actual departure. After that, call a second system_wait_for_sms from Driver with context "Driver delivery-to-shop update for $selectedShop" and no old watchId. Only an inbound Driver message that says Kylin was delivered, arrived, 到店, 送到, or 送达 satisfies delivery-to-shop.
-                After Driver confirms the first pickup plan, do not send Driver another SMS asking for future milestone reports. For Driver delivery-to-shop update, call system_wait_for_sms with Driver as the sender. Do not wait on $selectedShop for arrival or progress until Driver has reported Kylin was delivered to $selectedShop.
-                For the normal selected scope, use the pet salon search service's published price for Kylin's extra-large Bernese Mountain Dog size and selected bath/de-shedding scope. Do not use small-dog pricing, full grooming/styling pricing, or pickup coordination fees unless Y or $selectedShop explicitly changes the scope.
-                Do not include prices, totals, fee details, or CNY in normal outbound $selectedShop SMS. $selectedShop SMS should only confirm time, service scope, and booking status unless there is an abnormal price issue.
-                For payment and accounting date, use $paymentDate for this run. Do not use the phone's real current year.
-                If payment is already completed but no expense has been recorded, the next tool must be device_system with action "accounting" for $selectedShop, the same amount used for payment from the published service result, date $paymentDate, and a Chinese description for Kylin's grooming.
-                A Driver promise to return Kylin later is not home confirmation. Do not call system_wait_for_sms for home confirmation until after Driver has been told to bring Kylin home or has reported Kylin is on the way home.
-                When home confirmation is the next missing milestone, send Driver a short SMS asking him to reply once Kylin is home, then call system_wait_for_sms with the returned watchId. Do not pay or account until that inbound Driver SMS explicitly says Kylin is home.
-                Do not ask Y whether to create routine reminders, and do not stop at a routine reminder question. Create routine reminders autonomously when useful, then continue to the next SMS signal.
-                If payment or accounting already happened before Driver home confirmation, still wait for Driver home confirmation before final status.
-                If a message was sent and no matching reply was received, call system_wait_for_sms for that contact.
-                Ask Y only for a declared decision point, a material time/service tradeoff, safety issue, unusual fee, failed payment, or unclear instruction.
-            """.trimIndent()
-        }
+        private fun scenarioContinuationPrompt(): String =
+            OneHourScenarioPolicy.continuationPrompt(
+                date = activeServiceDate,
+                useAlternativeService = selectedAppointmentIsAlternative(),
+            )
 
-        private fun groomingDeferred(frame: AgentExperienceFrame): Boolean {
-            if (frame.scenario.scenarioId != "pet-grooming") return false
-            return latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingDeferCurrentWeek
+        private fun scenarioDeferred(frame: AgentExperienceFrame): Boolean {
+            if (!OneHourScenarioPolicy.matches(frame.scenario.scenarioId)) return false
+            return OneHourScenarioPolicy.isDeferCurrentWeek(latestAgentDecisionIntent)
         }
 
         private fun shouldScheduleDeferredRetrigger(frame: AgentExperienceFrame): Boolean =
-            frame.scenario.scenarioId == "pet-grooming" &&
+            OneHourScenarioPolicy.matches(frame.scenario.scenarioId) &&
                 frame.finalSummary != null &&
                 frame.decisionPrompt == null &&
                 frame.error == null &&
-                groomingDeferred(frame)
+                scenarioDeferred(frame)
 
         private fun scheduleDeferredRetrigger() {
             if (deferredRetriggerInProgress) return
@@ -520,10 +577,9 @@ class AgentExperienceViewModel
                 val nextClock = scenarioClock.plusDays(7).withHour(13).withMinute(0).withSecond(0).withNano(0)
                 advanceClockTo(nextClock)
                 scenarioClock = nextClock
-                latestScenarioDecisionIntent = null
+                latestAgentDecisionIntent = null
                 pendingSelectedActionLabel = null
-                lastGroomingPaymentAmount = null
-                groomingMilestones.clear()
+                scenarioRunTracker.clear()
                 _frame.value = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
                 deferredRetriggerInProgress = false
                 delay(AUTO_TRIGGER_DELAY_MS)
@@ -548,36 +604,28 @@ class AgentExperienceViewModel
         private fun AgentExperienceFrame.withClock(clock: LocalDateTime): AgentExperienceFrame =
             copy(
                 clockTimeText = clock.toLocalTime().format(CLOCK_TIME_FORMATTER),
-                clockDateText = "${clock.toLocalDate().format(CLOCK_DATE_FORMATTER)} ${scenarioDayName(clock, full = false)}",
+                clockDateText = "${clock.toLocalDate().format(CLOCK_DATE_FORMATTER)} ${scenarioDayLabel(clock)}",
+                clockMode = clockMode,
             )
 
-        private fun scenarioDayName(
-            clock: LocalDateTime,
-            full: Boolean,
-        ): String {
-            val dayOffset = Duration.between(INITIAL_SCENARIO_CLOCK.toLocalDate().atStartOfDay(), clock.toLocalDate().atStartOfDay())
-                .toDays()
-                .let { Math.floorMod(it, SCENARIO_DAY_NAMES.size.toLong()) }
-                .toInt()
-            return if (full) SCENARIO_DAY_NAMES[dayOffset].first else SCENARIO_DAY_NAMES[dayOffset].second
+        private fun scenarioDayLabel(clock: LocalDateTime): String {
+            val offset = Duration.between(
+                INITIAL_SCENARIO_CLOCK.toLocalDate().atStartOfDay(),
+                clock.toLocalDate().atStartOfDay(),
+            ).toDays()
+            return SCENARIO_DAY_LABELS[Math.floorMod(offset, SCENARIO_DAY_LABELS.size.toLong()).toInt()]
         }
 
-        private fun groomingClosureSatisfied(frame: AgentExperienceFrame): Boolean {
-            if (frame.scenario.scenarioId != "pet-grooming") return false
-            return groomingMilestones.containsAll(
-                setOf(
-                    GroomingMilestone.HOME_CONFIRMED,
-                    GroomingMilestone.PAYMENT_COMPLETED,
-                    GroomingMilestone.EXPENSE_RECORDED,
-                ),
-            )
+        private fun scenarioClosureSatisfied(frame: AgentExperienceFrame): Boolean {
+            if (!OneHourScenarioPolicy.matches(frame.scenario.scenarioId)) return false
+            return scenarioRunTracker.closureSatisfied()
         }
 
         private fun handleAgentMessage(content: String, metadata: Map<String, String>) {
             val runtime = metadata["_runtime"].orEmpty()
             val tool = metadata["_tool"].orEmpty()
             if (runtime == "tool" && metadata["_ok"] == "1") {
-                recordGroomingMilestones(tool, content)
+                recordScenarioMilestones(tool, content)
             }
             _frame.update { frame ->
                 val debugLine = buildDebugLine(runtime, tool, content)
@@ -672,7 +720,7 @@ class AgentExperienceViewModel
                         val actions = parseActionButtons(metadata["_actions"], content)
                         val displayText = compactDecisionPromptText(content)
                         val visibleBase = base.withPendingSelectedAction()
-                        if (shouldSuppressResolvedGroomingPrompt(content)) {
+                        if (shouldSuppressResolvedScenarioPrompt(content)) {
                             visibleBase.copy(
                                 statusLabel = "Running",
                                 finalSummary = content,
@@ -754,7 +802,7 @@ class AgentExperienceViewModel
                             )
                         } else {
                             val decisionPrompt =
-                                if (shouldSuppressResolvedGroomingPrompt(content)) null else inferDecisionPrompt(content)
+                                if (shouldSuppressResolvedScenarioPrompt(content)) null else inferDecisionPrompt(content)
                             if (decisionPrompt != null) {
                                 val visibleBase = base.withPendingSelectedAction()
                                 visibleBase.copy(
@@ -783,9 +831,9 @@ class AgentExperienceViewModel
                             } else {
                                 val displayText = compactFinalSummary(content)
                                 val silentProgress =
-                                    scenario.scenarioId == "pet-grooming" &&
+                                    OneHourScenarioPolicy.matches(scenario.scenarioId) &&
                                     displayText == null &&
-                                    isTransientGroomingNarration(content)
+                                    OneHourScenarioPolicy.isTransientNarration(content)
                                 val visibleBase = base.withPendingSelectedAction()
                                 visibleBase.copy(
                                     finalSummary = displayText ?: content,
@@ -827,12 +875,11 @@ class AgentExperienceViewModel
         private fun visibleAssistantUpdate(content: String): String? {
             if (content.isBlank() || content.length > MAX_VISIBLE_ASSISTANT_UPDATE_CHARS) return null
             val lower = content.lowercase()
-            if (scenario.scenarioId == "pet-grooming" && isTransientGroomingNarration(content)) return null
+            if (OneHourScenarioPolicy.matches(scenario.scenarioId) && OneHourScenarioPolicy.isTransientNarration(content)) return null
             if (
                 lower.contains("system_wait_for_sms") ||
                 lower.contains("device_system") ||
                     lower.contains("device system") ||
-                    lower.contains("pet-grooming workflow") ||
                     lower.contains("workflow requires") ||
                     lower.contains("required closure") ||
                     lower.contains("closure requirements") ||
@@ -864,14 +911,16 @@ class AgentExperienceViewModel
         private fun compactFinalSummary(content: String): String? {
             val lower = content.lowercase()
             return when {
-                scenario.scenarioId == "pet-grooming" &&
-                    isTransientGroomingNarration(content) -> null
-                scenario.scenarioId == "pet-grooming" &&
+                OneHourScenarioPolicy.matches(scenario.scenarioId) &&
+                    OneHourScenarioPolicy.isTransientNarration(content) -> null
+                OneHourScenarioPolicy.matches(scenario.scenarioId) &&
                     isRoutineReminderQuestion(content) -> null
-                scenario.scenarioId == "pet-grooming" &&
-                    lower.contains("petsmart") &&
-                    content.contains("最终价格") -> "已向 PetSmart 发送短信，确认周日可选时段和服务内容。"
-                groomingCompletionText(lower) -> compactGroomingCompletionText(content)
+                OneHourScenarioPolicy.matches(scenario.scenarioId) &&
+                    OneHourScenarioPolicy.isServiceContact(content) &&
+                    content.contains("最终价格") -> "已向服务方发送短信，确认可选时段和服务内容。"
+                OneHourScenarioPolicy.matches(scenario.scenarioId) &&
+                    OneHourScenarioPolicy.isCompletionText(content) ->
+                    OneHourScenarioPolicy.compactCompletionText(content, scenarioRunTracker.paymentAmount)
                 (
                     lower.contains("deferred") ||
                         lower.contains("skip this week") ||
@@ -886,42 +935,6 @@ class AgentExperienceViewModel
             }
         }
 
-        private fun isTransientGroomingNarration(text: String): Boolean =
-            text.contains("正在发送") ||
-                text.contains("正在等待") ||
-                text.contains("等待 PetSmart 回复") ||
-                text.contains("稍后将等待") ||
-                text.contains("稍后将自动处理") ||
-                text.contains("已向 PetSmart 发送") ||
-                text.contains("已向 Harbor Paws Salon 发送") ||
-                text.contains("接下来将等待") ||
-                text.contains("之后立即联系司机") ||
-                text.contains("发送预约咨询短信") ||
-                text.contains("详细信息已加载") ||
-                (text.contains("Driver 已识别") && text.contains("PetSmart")) ||
-                (text.contains("已确认：") && text.contains("PetSmart")) ||
-                text.contains("现在向 PetSmart 发送短信") ||
-                text.contains("是否现在就联系司机") ||
-                text.contains("接下来将联系您的私人司机") ||
-                text.contains("已向司机发送指令") ||
-                text.contains("等待司机回复确认") ||
-                text.contains("正在监听司机") ||
-                text.contains("pickup 计划") ||
-                text.contains("已启动监听") ||
-                text.contains("仍在监听") ||
-                text.contains("当前状态为") ||
-                text.contains("按流程优先级") ||
-                text.contains("首个缺失") ||
-                text.contains("实际属于") ||
-                text.contains("下一步：") ||
-                text.contains("4:45前送达") ||
-                (
-                    text.contains("预约已确认") &&
-                        text.contains("接下来") &&
-                        text.contains("司机") &&
-                        text.contains("PetSmart")
-                )
-
         private fun offersDeferralAsOption(text: String): Boolean =
             text.contains("`改天再说`") ||
                 text.lineSequence().any { line ->
@@ -930,48 +943,16 @@ class AgentExperienceViewModel
                         trimmed.contains("改天")
                 }
 
-        private fun groomingCompletionText(text: String): Boolean =
-            !text.contains("pending") &&
-                !text.contains("home confirmation pending") &&
-                !text.contains("到家确认待") &&
-                !text.contains("等待司机确认") &&
-                (
-                    text.contains("all steps complete") ||
-                        text.contains("paid and accounted") ||
-                        text.contains("payment completed") ||
-                        text.contains("closed loop") ||
-                        text.contains("流程闭环") ||
-                        text.contains("全流程已完成") ||
-                        text.contains("全流程完成") ||
-                        text.contains("全流程顺利完成") ||
-                        text.contains("全部完成") ||
-                        (text.contains("支付") && (text.contains("记账") || text.contains("账务") || text.contains("支付与记账") || text.contains("支付及记账") || text.contains("费用已记入") || text.contains("已记入")))
-                ) &&
-                (text.contains("到家") || text.contains("安全到家") || text.contains("回家") || text.contains("已接回") || text.contains("接回") || text.contains("home")) &&
-                (text.contains("kylin") || text.contains("麒麟"))
-
         private fun isRoutineReminderQuestion(text: String): Boolean {
-            val lower = text.lowercase()
-            return scenario.scenarioId == "pet-grooming" &&
-                (text.contains("需要我") || lower.contains("do you want me")) &&
-                (text.contains("提醒") || lower.contains("reminder")) &&
-                !looksLikeDecisionRequest(text)
-        }
-
-        private fun compactGroomingCompletionText(text: String): String {
-            val amount = lastGroomingPaymentAmount
-                ?: Regex("""(?:¥|￥)\s?\d+(?:\.\d+)?|(?:cny|rmb|yuan)\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:yuan|rmb|cny|元)""", RegexOption.IGNORE_CASE)
-                    .find(text)
-                    ?.value
-                    ?.replace(Regex("""\s+"""), "")
-                    ?.let(::normalizeAmountText)
-            val feeText = amount?.let { "洗护费用 $it" } ?: "洗护费用"
-            return "麒麟已到家，$feeText 已支付并完成记账。"
+            return OneHourScenarioPolicy.matches(scenario.scenarioId) &&
+                OneHourScenarioPolicy.isRoutineReminderQuestion(
+                    text = text,
+                    looksLikeDecisionRequest = looksLikeDecisionRequest(text),
+                )
         }
 
         private fun normalizeAmountText(value: String): String {
-            val number = Regex("""\d+(?:\.\d+)?""").find(value)?.value ?: return value
-            return "${number}元"
+            return OneHourScenarioPolicy.normalizeAmountText(value)
         }
 
         private fun containsChinese(text: String): Boolean =
@@ -1007,12 +988,50 @@ class AgentExperienceViewModel
         }
 
         fun dismissSystemNotification() {
-            _frame.update { it.copy(systemNotification = null) }
+            var shouldAutoAdvanceActiveCall = false
+            _frame.update { frame ->
+                val notification = frame.systemNotification
+                val call = if (notification != null && notification.actionLabel.trim() == "接听") {
+                    // 接听后短暂展示通话态，再自动推进到系统通话结束事件。
+                    shouldAutoAdvanceActiveCall = true
+                    AgentActiveCall(
+                        id = notification.id,
+                        caller = notification.title.removeSuffix(" 来电"),
+                        startedTimeText = notification.timeText,
+                        statusText = "正在通话",
+                        transcriptText = "通话转写中",
+                    )
+                } else {
+                    frame.activeCall
+                }
+                frame.copy(
+                    systemNotification = null,
+                    activeCall = call,
+                )
+            }
+            if (shouldAutoAdvanceActiveCall) {
+                viewModelScope.launch {
+                    delay(CALL_CONNECTED_DISPLAY_MS)
+                    if (_frame.value.activeCall != null) {
+                        accelerateClockUntilNextEvent()
+                    }
+                }
+            }
+        }
+
+        fun expireSystemNotification(notificationId: String) {
+            _frame.update { frame ->
+                if (frame.systemNotification?.id == notificationId) {
+                    frame.copy(systemNotification = null)
+                } else {
+                    frame
+                }
+            }
         }
 
         private fun toolStartEvent(tool: String): AgentTimelineEvent {
             val (title, detail) = when (tool) {
-                "use_skill" -> "流程已选择" to "加载麒麟洗护协调规则。"
+                "use_skill" -> "流程已选择" to "加载协调规则。"
                 "create_plan" -> "开始规划" to "准备执行阶段。"
                 "device_system" -> "检查上下文" to "读取手机上下文和服务状态。"
                 "system_search_contacts" -> "检查联系人" to "确认相关参与方。"
@@ -1047,7 +1066,7 @@ class AgentExperienceViewModel
             ok: Boolean,
         ): AgentTimelineEvent {
             val detail = when (tool) {
-                "use_skill" -> "麒麟洗护协调规则已启用。"
+                "use_skill" -> "协调规则已启用。"
                 "create_plan" -> "执行阶段已更新。"
                 "device_system" -> systemSignalFromDeviceResult(content)
                 "system_search_contacts" -> systemSignalFromDeviceResult(content)
@@ -1101,7 +1120,7 @@ class AgentExperienceViewModel
 
         private fun memorySignal(content: String): String =
             when {
-                content.contains("\"key\":\"memory\"", ignoreCase = true) -> "麒麟服务偏好已加载。"
+                content.contains("\"key\":\"memory\"", ignoreCase = true) -> "服务偏好已加载。"
                 content.contains("\"key\":\"places\"", ignoreCase = true) -> "家庭和常用地点已加载。"
                 content.contains("\"key\":\"social\"", ignoreCase = true) -> "可信服务关系已加载。"
                 else -> "用户资料已加载。"
@@ -1223,14 +1242,8 @@ class AgentExperienceViewModel
         private fun serviceTaskLogText(data: JSONObject?): String {
             val serviceId = data?.optString("serviceId").orEmpty()
             val action = data?.optString("action").orEmpty()
-            val actionLower = action.lowercase()
+            OneHourScenarioPolicy.serviceTaskLogText(serviceId, action, firstNamedEntity(data))?.let { return it }
             return when {
-                serviceId == "pet_salon_search" && actionLower.contains("detail") -> {
-                    val shopName = firstNamedEntity(data).ifBlank { "PetSmart" }
-                    "添加 $shopName 到参与方。"
-                }
-                serviceId == "pet_salon_search" ->
-                    "查询附近宠物店。"
                 serviceId.isNotBlank() ->
                     "获取 $serviceId 服务信息。"
                 else ->
@@ -1312,7 +1325,7 @@ class AgentExperienceViewModel
             participant: AgentParticipant,
         ): List<AgentParticipant> {
             val withoutSameRole =
-                if (participant.role == "grooming_service") {
+                if (participant.role == "service_provider") {
                     existing.filterNot { it.role == participant.role }
                 } else {
                     existing
@@ -1333,8 +1346,8 @@ class AgentExperienceViewModel
             val trimmed = name.trim()
             val lower = trimmed.lowercase()
             val role = when {
-                lower.contains("driver") || trimmed.contains("司机") -> "private_driver"
-                lower.contains("pet") || lower.contains("salon") || trimmed.contains("宠物") || trimmed.contains("洗护") -> "grooming_service"
+                OneHourScenarioPolicy.participantRoleForContact(trimmed) == "private_driver" -> "private_driver"
+                OneHourScenarioPolicy.participantRoleForContact(trimmed) == "service_provider" -> "service_provider"
                 else -> "service"
             }
             return AgentParticipant(
@@ -1346,15 +1359,10 @@ class AgentExperienceViewModel
         }
 
         private fun participantLabel(name: String): String {
-            val lower = name.lowercase()
-            return when {
-                lower.contains("driver") || name.contains("司机") -> "D"
-                lower.contains("petsmart") -> "PS"
-                else -> {
-                    val letters = name.filter { it.isLetterOrDigit() }
-                    if (letters.isBlank()) name.take(1) else letters.take(2).uppercase()
-                }
-            }
+            val label = OneHourScenarioPolicy.labelForContact(name)
+            if (label != "?") return label
+            val letters = name.filter { it.isLetterOrDigit() }
+            return if (letters.isBlank()) name.take(1) else letters.take(2).uppercase()
         }
 
         private fun partyTaskLogsFromToolResult(
@@ -1369,11 +1377,9 @@ class AgentExperienceViewModel
             val contact = sms.optString("displayName").ifBlank {
                 sms.optString("to").ifBlank { sms.optString("from") }
             }
-            val party = when {
-                contact.equals("Driver", ignoreCase = true) -> "Driver"
-                isGroomingShopContact(contact) -> groomingShopNameIn(contact) ?: contact
-                else -> return emptyList()
-            }
+            val party = OneHourScenarioPolicy.displayContactName(contact).takeIf {
+                it != contact || OneHourScenarioPolicy.participantRoleForContact(contact) == "private_driver"
+            } ?: return emptyList()
             if (existing.any { it.text.contains("添加") && it.text.contains(party) && it.text.contains("参与方") }) {
                 return emptyList()
             }
@@ -1421,58 +1427,116 @@ class AgentExperienceViewModel
             }
         }
 
-        private fun selectedGroomingShopName(): String =
-            if (selectedAppointmentIsAlternative()) "Harbor Paws Salon" else "PetSmart"
-
-        private fun isGroomingShopContact(contact: String): Boolean =
-            groomingShopNameIn(contact) != null ||
-                contact.contains("pet", ignoreCase = true) ||
-                contact.contains("salon", ignoreCase = true) ||
-                contact.contains("groom", ignoreCase = true) ||
-                contact.contains("宠物") ||
-                contact.contains("洗护") ||
-                contact.contains("洗澡")
-
-        private fun groomingShopNameIn(text: String): String? =
-            when {
-                text.contains("Harbor Paws", ignoreCase = true) ||
-                    text.contains("harbor-paws-salon", ignoreCase = true) ||
-                    text.contains("+86-756-888-1111") ||
-                    text.contains("756-888-1111") -> "Harbor Paws Salon"
-                text.contains("PetSmart", ignoreCase = true) ||
-                    text.contains("Pet Smart", ignoreCase = true) ||
-                    text.contains("+86-756-888-0001") ||
-                    text.contains("756-888-0001") -> "PetSmart"
-                else -> null
-            }
-
         private fun displayReminderBody(raw: String): String {
-            val shopName = groomingShopNameIn(raw) ?: return raw
-            if (!raw.contains("司机") && !raw.contains("Driver")) return raw
+            return OneHourScenarioPolicy.displayReminderBody(raw)
+        }
 
-            val normalized = raw
-                .replace("5:00前送达 PetSmart", "17:00前送达 PetSmart")
-                .replace("5:00前送到 PetSmart", "17:00前送达 PetSmart")
-
-            return when {
-                normalized.contains("13:30") ||
-                    normalized.contains("14:00") ||
-                    normalized.contains("下午2") ||
-                    normalized.contains("下午两点") ->
-                    "13:30 Driver 到家接 Kylin，14:00前送达 $shopName。"
-                normalized.contains("16:30") ||
-                    normalized.contains("17:00") ->
-                    "16:30 Driver 到家接 Kylin，17:00前送达 $shopName。"
-                normalized.contains("8:30") ||
-                    normalized.contains("08:30") ||
-                    normalized.contains("9:00") ||
-                    normalized.contains("09:00") ||
-                    normalized.contains("9点") ->
-                    "08:30 Driver 到家接 Kylin，09:00前送达 $shopName。"
-                else -> normalized
+        private fun applyScenarioTaskUpdate(
+            update: ScenarioTaskUpdate,
+            timeText: String,
+            activate: Boolean = false,
+        ) {
+            updateTaskState(update.taskId, activate = activate) { task ->
+                val baseParticipants = update.participants?.map { it.toAgentParticipant() } ?: task.participants
+                val withAdded = update.participantsToAdd.fold(baseParticipants) { participants, participant ->
+                    participants.withParticipant(participant.toAgentParticipant())
+                }
+                val participants = if (update.participantsToRemove.isEmpty()) {
+                    withAdded
+                } else {
+                    withAdded.filterNot { it.id in update.participantsToRemove }
+                }
+                task.copy(
+                    status = update.status.toAgentStatus(),
+                    updatedTimeText = timeText,
+                    subtitle = update.subtitle,
+                    conversationItems = task.conversationItems + update.conversations.map { it.toConversationItem() },
+                    taskLogs = appendTaskLogs(task.taskLogs, update.logs.toTaskLogs(timeText)),
+                    participants = participants,
+                    progressLine = update.progress.toProgressLine(),
+                    decisionPrompt = update.decision?.toDecisionPrompt(),
+                    activeActionValue = update.activeActionValue,
+                    timeline = task.timeline + update.timeline.map { it.toTimelineEvent() },
+                    finalSummary = update.finalSummary ?: task.finalSummary,
+                )
             }
         }
 
+        private fun ScenarioTaskSeed.toTaskState(timeText: String): AgentTaskState =
+            AgentTaskState(
+                id = taskId,
+                title = title,
+                subtitle = subtitle,
+                status = status.toAgentStatus(),
+                updatedTimeText = timeText,
+                conversationItems = conversations.map { it.toConversationItem() },
+                taskLogs = logs.toTaskLogs(timeText),
+                participants = participants.map { it.toAgentParticipant() },
+                progressLine = progress.toProgressLine(),
+                timeline = timeline.map { it.toTimelineEvent() },
+                decisionPrompt = decision?.toDecisionPrompt(),
+            )
+
+        private fun ScenarioSurfaceStatus.toAgentStatus(): AgentTimelineStatus =
+            when (this) {
+                ScenarioSurfaceStatus.RUNNING -> AgentTimelineStatus.RUNNING
+                ScenarioSurfaceStatus.DONE -> AgentTimelineStatus.DONE
+                ScenarioSurfaceStatus.BLOCKED -> AgentTimelineStatus.BLOCKED
+            }
+
+        private fun ScenarioConversation.toConversationItem(): AgentConversationItem =
+            AgentConversationItem(
+                id = nextId("conversation"),
+                role = when (role) {
+                    ScenarioSurfaceRole.AGENT -> AgentConversationRole.AGENT
+                    ScenarioSurfaceRole.USER -> AgentConversationRole.USER
+                },
+                text = text,
+            )
+
+        private fun List<ScenarioLog>.toTaskLogs(timeText: String): List<AgentTaskLog> =
+            map {
+                AgentTaskLog(
+                    id = nextId("task"),
+                    timeText = timeText,
+                    text = it.text,
+                )
+            }
+
+        private fun ScenarioParticipant.toAgentParticipant(): AgentParticipant =
+            AgentParticipant(
+                id = id,
+                label = label,
+                displayName = displayName,
+                role = role,
+            )
+
+        private fun ScenarioProgress.toProgressLine(): AgentProgressLine =
+            AgentProgressLine(
+                label = label,
+                detail = detail,
+                completed = completed,
+                total = total,
+            )
+
+        private fun ScenarioDecision.toDecisionPrompt(): DecisionPrompt =
+            DecisionPrompt(
+                text = text,
+                actions = actions.map {
+                    ActionButton(
+                        label = it.label,
+                        value = "$SCRIPTED_ACTION_PREFIX${it.key}",
+                    )
+                },
+            )
+
+        private fun ScenarioTimeline.toTimelineEvent(): AgentTimelineEvent =
+            AgentTimelineEvent(
+                id = nextId("timeline"),
+                title = title,
+                detail = detail,
+                status = status.toAgentStatus(),
+            )
         private fun AgentExperienceFrame.withScenarioEventClock(
             tool: String,
             content: String,
@@ -1482,15 +1546,347 @@ class AgentExperienceViewModel
 
         private fun tickScenarioClock() {
             if (deferredRetriggerInProgress) return
-            scenarioClock = scenarioClock.plusMinutes(1)
-            _frame.update { it.withClock(scenarioClock) }
+            if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
+                scenarioClock = scenarioClock.plusMinutes(1)
+                _frame.update { it.withClock(scenarioClock) }
+                handleDueTimelineEvents()
+                return
+            }
+            normalClockElapsedMs += CLOCK_LOOP_INTERVAL_MS
+            if (normalClockElapsedMs >= SCENARIO_CLOCK_TICK_MS) {
+                normalClockElapsedMs = 0L
+                scenarioClock = scenarioClock.plusMinutes(1)
+                _frame.update { it.withClock(scenarioClock) }
+                handleDueTimelineEvents()
+            }
         }
 
+        private fun handleDueTimelineEvents() {
+            val due = timelineScript
+                .filter { it.id !in deliveredTimelineEvents && !it.triggerAt.isAfter(scenarioClock) }
+                .sortedBy { it.triggerAt }
+            if (due.isEmpty()) return
+            for (event in due) {
+                deliveredTimelineEvents += event.id
+                viewModelScope.launch {
+                    systemRuntime.publishEvent(event.toSystemRuntimeEvent())
+                }
+            }
+            if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
+                clockMode = ScenarioClockMode.Live
+                normalClockElapsedMs = 0L
+                _frame.update { it.copy(clockMode = clockMode) }
+            }
+        }
+
+        private fun handleSystemRuntimeEvent(event: SystemRuntimeEvent) {
+            _frame.update {
+                it.copy(
+                    recentSystemEvents = appendSystemEvent(it.recentSystemEvents, event),
+                    debugTrace = appendTrace(it.debugTrace, "system event -> ${event.id}"),
+                )
+            }
+            applyOneHourFlowEffects(oneHourFlow.handle(event), blueprintTimeText(event.occurredAt))
+        }
+
+        private fun handleLocalScenarioDecision(
+            displayText: String,
+            rawText: String,
+            selectedActionValue: String?,
+        ) {
+            val prompt = _frame.value.decisionPrompt ?: return
+            if (selectedActionValue != null) {
+                pendingSelectedActionLabel = displayText
+            }
+            _frame.update {
+                it.copy(
+                    statusLabel = "理解中",
+                    busy = true,
+                    decisionPrompt = if (selectedActionValue == null) null else it.decisionPrompt,
+                    activeActionValue = selectedActionValue,
+                    conversationItems = it.conversationItems,
+                    progressLine = it.progressLine.copy(
+                        label = "理解中",
+                        detail = displayText,
+                    ),
+                    debugTrace = appendTrace(it.debugTrace, "local decision -> ${rawText.take(160)}"),
+                )
+            }
+            viewModelScope.launch {
+                val normalized = decisionIntentNormalizer.normalize(
+                    AgentDecisionInput(
+                        contextId = scenario.scenarioId,
+                        promptText = prompt.text,
+                        presentedActions = prompt.actions.map { it.toAgentDecisionAction() },
+                        candidateIntents = OneHourScenarioPolicy.decisionIntents(scenario.scenarioId),
+                        displayText = displayText,
+                        rawText = rawText,
+                    ),
+                )
+                _frame.update {
+                    it.copy(
+                        debugTrace = appendTrace(
+                            it.debugTrace,
+                            "local intent -> ${normalized.intent.id}${if (normalized.usedFallback) " (fallback)" else ""}",
+                        ),
+                    )
+                }
+                // LLM 只负责识别用户意图，具体执行仍走稳定的场景动作。
+                when {
+                    OneHourScenarioPolicy.isAcceptOpenSlot(normalized.intent) -> acceptOpenSlot(displayText)
+                    OneHourScenarioPolicy.isKeepOriginalSlot(normalized.intent) -> keepOriginalSlot(displayText)
+                    else -> askOpenSlotClarification(displayText)
+                }
+            }
+        }
+
+        private fun askOpenSlotClarification(userText: String) {
+            val (conversations, decision) = OneHourScenarioPolicy.openSlotClarification(userText)
+            val prompt = decision.toDecisionPrompt()
+            _frame.update {
+                it.copy(
+                    busy = false,
+                    statusLabel = "等待",
+                    decisionPrompt = prompt,
+                    activeActionValue = null,
+                    conversationItems = it.conversationItems + conversations.map { item -> item.toConversationItem() },
+                    progressLine = AgentProgressLine(
+                        label = "等待",
+                        detail = "等待用户决策",
+                        completed = it.progressLine.completed,
+                        total = it.progressLine.total,
+                    ),
+                    debugTrace = appendTrace(it.debugTrace, "local decision clarification -> $userText"),
+                )
+            }
+        }
+
+        private fun acceptOpenSlot(label: String) {
+            pendingSelectedActionLabel = null
+            applyOneHourFlowEffect(oneHourFlow.acceptPetCareSlot(label), blueprintTimeText(scenarioClock))
+        }
+
+        private fun keepOriginalSlot(label: String) {
+            pendingSelectedActionLabel = null
+            applyOneHourFlowEffect(oneHourFlow.keepOriginalPetCareSlot(label), blueprintTimeText(scenarioClock))
+        }
+
+        private fun applyOneHourFlowEffects(
+            effects: List<OneHourFlowEffect>,
+            timeText: String,
+        ) {
+            effects.forEach { applyOneHourFlowEffect(it, timeText) }
+        }
+
+        private fun applyOneHourFlowEffect(
+            effect: OneHourFlowEffect,
+            timeText: String,
+        ) {
+            when (effect) {
+                is OneHourFlowEffect.CreateTask -> upsertTask(effect.seed.toTaskState(timeText))
+                is OneHourFlowEffect.UpdateTask -> applyScenarioTaskUpdate(
+                    update = effect.update,
+                    timeText = timeText,
+                    activate = effect.activate,
+                )
+                is OneHourFlowEffect.ShowSystemLayer -> showSystemLayer(effect, timeText)
+                is OneHourFlowEffect.ClearSystemLayer -> clearSystemLayer(effect.ids)
+                OneHourFlowEffect.ClearActiveCall -> _frame.update { it.copy(activeCall = null) }
+            }
+        }
+
+        private fun showSystemLayer(
+            effect: OneHourFlowEffect.ShowSystemLayer,
+            timeText: String,
+        ) {
+            _frame.update {
+                it.copy(
+                    systemNotification = AgentSystemNotification(
+                        id = effect.id,
+                        title = effect.title,
+                        timeText = timeText,
+                        body = effect.body,
+                        actionLabel = effect.actionLabel,
+                    ),
+                )
+            }
+        }
+
+        private fun clearSystemLayer(ids: Set<String>) {
+            _frame.update {
+                it.copy(
+                    systemNotification = if (it.systemNotification?.id in ids) null else it.systemNotification,
+                )
+            }
+        }
+        private fun upsertTask(task: AgentTaskState) {
+            taskStates[_frame.value.activeTaskId]?.let {
+                taskStates[it.id] = _frame.value.captureTaskState(it)
+            }
+            val updatedTask = task.copy(sortKey = nextTaskSortKey())
+            taskStates[updatedTask.id] = updatedTask
+            _frame.update { updatedTask.applyToFrame(it) }
+        }
+
+        private fun updateTaskState(
+            taskId: String,
+            activate: Boolean,
+            transform: (AgentTaskState) -> AgentTaskState,
+        ) {
+            val existing = taskStates[taskId] ?: return
+            val updated = transform(existing).copy(sortKey = nextTaskSortKey())
+            taskStates[taskId] = updated
+            if (activate || _frame.value.activeTaskId == taskId) {
+                _frame.update { updated.applyToFrame(it) }
+            } else {
+                _frame.update { frame ->
+                    frame.copy(taskCards = taskCardsFor(activeId = frame.activeTaskId))
+                }
+            }
+        }
+
+        private fun AgentExperienceFrame.captureTaskState(previous: AgentTaskState): AgentTaskState =
+            previous.copy(
+                conversationItems = conversationItems,
+                taskLogs = taskLogs,
+                participants = participants,
+                progressLine = progressLine,
+                timeline = timeline,
+                stageCards = stageCards,
+                decisionPrompt = decisionPrompt,
+                activeActionValue = activeActionValue,
+                finalSummary = finalSummary,
+                error = error,
+            )
+
+        private fun AgentTaskState.applyToFrame(frame: AgentExperienceFrame): AgentExperienceFrame =
+            frame.copy(
+                activeTaskId = id,
+                activeTaskTitle = title,
+                activeTaskSubtitle = subtitle,
+                taskCards = taskCardsFor(activeId = id),
+                statusLabel = when (status) {
+                    AgentTimelineStatus.BLOCKED -> "Waiting for decision"
+                    AgentTimelineStatus.DONE -> "Complete"
+                    AgentTimelineStatus.FAILED -> "Error"
+                    else -> "Running"
+                },
+                hasStarted = true,
+                conversationItems = conversationItems,
+                taskLogs = taskLogs,
+                participants = participants,
+                progressLine = progressLine,
+                timeline = timeline,
+                stageCards = stageCards,
+                decisionPrompt = decisionPrompt,
+                activeActionValue = activeActionValue,
+                finalSummary = finalSummary,
+                error = error,
+            )
+
+        private fun taskCardsFor(activeId: String?): List<AgentTaskCard> =
+            taskStates.values
+                .map { it.toCard(activeId = activeId) }
+                .sortedWith(
+                    compareByDescending<AgentTaskCard> { it.isPinned }
+                        .thenByDescending { it.sortKey },
+                )
+
+        private fun AgentTaskState.toCard(activeId: String?): AgentTaskCard =
+            AgentTaskCard(
+                id = id,
+                title = title,
+                subtitle = subtitle,
+                status = status,
+                updatedTimeText = updatedTimeText,
+                sortKey = sortKey,
+                isActive = id == activeId,
+                isPinned = id in pinnedTaskIds,
+            )
+
+        private fun nextTaskSortKey(): Long {
+            taskSortCounter += 1
+            return taskSortCounter
+        }
+
+        private fun List<AgentParticipant>.withParticipant(participant: AgentParticipant): List<AgentParticipant> =
+            if (any { it.id == participant.id }) this else this + participant
+
+        private fun appendSystemEvent(
+            existing: List<AgentSystemEvent>,
+            event: SystemRuntimeEvent,
+        ): List<AgentSystemEvent> =
+            (
+                existing + AgentSystemEvent(
+                    id = event.id,
+                    timeText = blueprintTimeText(event.occurredAt),
+                    source = event.source,
+                    title = event.title,
+                    body = event.body,
+                )
+            ).takeLast(MAX_SYSTEM_EVENTS)
+
+        private fun SystemRuntimeScriptEvent.toScenarioTimelineEvent(dayStart: LocalDateTime): ScenarioTimelineEvent? {
+            val timeValue = runCatching { LocalTime.parse(time, CLOCK_TIME_FORMATTER) }.getOrNull() ?: return null
+            return ScenarioTimelineEvent(
+                id = id,
+                triggerAt = dayStart.toLocalDate().atTime(timeValue),
+                type = type,
+                source = source,
+                title = title,
+                body = body,
+            )
+        }
+
+        private fun ScenarioTimelineEvent.toSystemRuntimeEvent(): SystemRuntimeEvent =
+            when (type) {
+                "incoming_sms" -> IncomingSmsEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    from = source,
+                )
+                "incoming_call" -> IncomingCallEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    contact = source,
+                )
+                "call_ended" -> CallEndedEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    contact = source,
+                    audioRef = id,
+                )
+                "reminder_fired" -> ReminderFiredEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                    reminderId = id,
+                )
+                else -> com.mobilebot.systemruntime.RuntimeNotificationEvent(
+                    id = id,
+                    occurredAt = triggerAt,
+                    source = source,
+                    title = title,
+                    body = body,
+                )
+            }
+
         private fun selectedAppointmentIsAfternoon(): Boolean =
-            latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingBookAfternoonBathOnly
+            OneHourScenarioPolicy.isAfternoonBathOnly(latestAgentDecisionIntent)
 
         private fun selectedAppointmentIsAlternative(): Boolean =
-            latestScenarioDecisionIntent == ScenarioDecisionIntent.PetGroomingFindAlternative
+            OneHourScenarioPolicy.isAlternativeService(latestAgentDecisionIntent)
 
         private fun parseToolData(content: String): JSONObject? {
             val json = content.substringAfter('\n', missingDelimiterValue = "").trim()
@@ -1498,44 +1894,21 @@ class AgentExperienceViewModel
             return runCatching { JSONObject(json) }.getOrNull()
         }
 
-        private fun recordGroomingMilestones(
+        private fun recordScenarioMilestones(
             tool: String,
             content: String,
         ) {
-            if (scenario.scenarioId != "pet-grooming") return
+            if (!OneHourScenarioPolicy.matches(scenario.scenarioId)) return
             if (!isSystemRuntimeTool(tool)) return
             val data = parseToolData(content) ?: return
-            val smsEventType = data.optJSONObject("sms")?.optString("eventType").orEmpty()
-            when (smsEventType) {
-                "driver_home_arrival" -> groomingMilestones += GroomingMilestone.HOME_CONFIRMED
-            }
-
-            val paymentStatus = data.optJSONObject("payment")?.optString("status").orEmpty()
-            if (paymentStatus == "completed") {
-                groomingMilestones += GroomingMilestone.PAYMENT_COMPLETED
-                lastGroomingPaymentAmount = data.optJSONObject("payment")
-                    ?.optString("amount")
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let(::normalizeAmountText)
-                    ?: lastGroomingPaymentAmount
-            }
-
-            val expenseStatus = data.optJSONObject("expense")?.optString("status").orEmpty()
-            if (expenseStatus == "recorded") {
-                groomingMilestones += GroomingMilestone.EXPENSE_RECORDED
-                lastGroomingPaymentAmount = data.optJSONObject("expense")
-                    ?.optString("amount")
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let(::normalizeAmountText)
-                    ?: lastGroomingPaymentAmount
-            }
+            scenarioRunTracker.recordSystemRuntimeData(data)
         }
 
         private fun parseActionButtons(json: String?, promptText: String): List<ActionButton> {
             val explicit =
                 try {
                     ActionPromptCodec.parseJson(json).map {
-                        ActionButton(label = compactScenarioActionLabel(it.label, it.value), value = it.value)
+                        ActionButton(label = compactActionLabel(it.label, it.value), value = it.value)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to parse action buttons", e)
@@ -1545,7 +1918,7 @@ class AgentExperienceViewModel
             val scenarioActions = inferScenarioActions(promptText)
             if (scenarioActions.isNotEmpty()) return scenarioActions
             val inferred = ActionPromptCodec.resolveOptions(promptText).map {
-                ActionButton(label = compactScenarioActionLabel(it.label, it.value), value = it.value)
+                ActionButton(label = compactActionLabel(it.label, it.value), value = it.value)
             }
             return inferred.ifEmpty {
                 listOf(
@@ -1558,134 +1931,23 @@ class AgentExperienceViewModel
         }
 
         private fun inferScenarioActions(promptText: String): List<ActionButton> {
-            if (scenario.scenarioId != "pet-grooming") return emptyList()
-            val lower = promptText.lowercase()
-            if (isAfternoonBathOnlyTradeoff(promptText)) {
-                return listOf(
-                    ActionButton("约下午5点", "USER_INTENT:pet_grooming.book_afternoon_bath_only"),
-                    ActionButton("约9点", "USER_INTENT:pet_grooming.book_0900"),
-                    ActionButton("换一家", "USER_INTENT:pet_grooming.find_alternative_shop"),
-                )
-            }
-            if (isGroomingTimeTradeoff(promptText)) {
-                return listOf(
-                    ActionButton("约9点", "USER_INTENT:pet_grooming.book_0900"),
-                    ActionButton("问下午", "USER_INTENT:pet_grooming.ask_afternoon"),
-                    ActionButton("换一家", "USER_INTENT:pet_grooming.find_alternative_shop"),
-                )
-            }
-            val asksToKeepGrooming =
-                (lower.contains("grooming") || promptText.contains("美容") || promptText.contains("洗澡") || promptText.contains("洗护")) &&
-                    (lower.contains("appointment") || lower.contains("sunday") || lower.contains("周日")) &&
-                    (
-                        lower.contains("regular") ||
-                            lower.contains("weekly") ||
-                            lower.contains("keep kylin") ||
-                            lower.contains("proceed") ||
-                            lower.contains("defer") ||
-                            promptText.contains("按计划") ||
-                            promptText.contains("请选择") ||
-                            promptText.contains("继续吗") ||
-                            lower.contains("照常") ||
-                            lower.contains("改天")
-                    )
-            if (!asksToKeepGrooming) return emptyList()
-            return listOf(
-                ActionButton("好的", "好的"),
-                ActionButton("改天再说", "改天再说"),
-            )
+            if (!OneHourScenarioPolicy.matches(scenario.scenarioId)) return emptyList()
+            return OneHourScenarioPolicy.actionCandidates(promptText)
+                .map { ActionButton(label = it.label, value = it.value) }
         }
 
-        private fun isGroomingTimeTradeoff(text: String): Boolean {
-            val lower = text.lowercase()
-            val hasPetSmart = lower.contains("petsmart") || text.contains("宠物店")
-            val hasMorning = lower.contains("9:00") || lower.contains("9am") || text.contains("上午九点") || text.contains("上午9点")
-            val hasAfternoon = lower.contains("afternoon") || lower.contains("5 pm") || lower.contains("17:00") ||
-                text.contains("下午") || text.contains("五点") || text.contains("5点")
-            val asksChoice = lower.contains("would you like") || lower.contains("which option") ||
-                lower.contains("tradeoff") || text.contains("要约") || text.contains("选择")
-            return hasPetSmart && hasMorning && hasAfternoon && asksChoice
+        private fun shouldSuppressResolvedScenarioPrompt(text: String): Boolean {
+            if (!OneHourScenarioPolicy.matches(scenario.scenarioId)) return false
+            return OneHourScenarioPolicy.shouldSuppressResolvedPrompt(text, latestAgentDecisionIntent)
         }
 
-        private fun isAfternoonBathOnlyTradeoff(text: String): Boolean {
-            val lower = text.lowercase()
-            val hasPetSmart = lower.contains("petsmart") || text.contains("宠物店")
-            val hasAfternoon = lower.contains("afternoon") || lower.contains("17:00") || lower.contains("5 pm") ||
-                text.contains("下午") || text.contains("五点") || text.contains("5点")
-            val hasBathOnly = lower.contains("bath-only") || lower.contains("bath only") ||
-                text.contains("只洗澡") || text.contains("不能除毛") || text.contains("不含除毛")
-            return hasPetSmart && hasAfternoon && hasBathOnly
-        }
-
-        private fun shouldSuppressResolvedGroomingPrompt(text: String): Boolean {
-            if (scenario.scenarioId != "pet-grooming") return false
-            val resolvedInitialTradeoff =
-                latestScenarioDecisionIntent in setOf(
-                    ScenarioDecisionIntent.PetGroomingBookNine,
-                    ScenarioDecisionIntent.PetGroomingAskAfternoon,
-                    ScenarioDecisionIntent.PetGroomingBookAfternoonBathOnly,
-                    ScenarioDecisionIntent.PetGroomingFindAlternative,
-                )
-            val resolvedAfternoonTradeoff =
-                latestScenarioDecisionIntent in setOf(
-                    ScenarioDecisionIntent.PetGroomingBookNine,
-                    ScenarioDecisionIntent.PetGroomingBookAfternoonBathOnly,
-                    ScenarioDecisionIntent.PetGroomingFindAlternative,
-                )
-            return when {
-                isAfternoonBathOnlyTradeoff(text) -> resolvedAfternoonTradeoff
-                isGroomingTimeTradeoff(text) -> resolvedInitialTradeoff
-                else -> false
-            }
-        }
-
-        private fun compactScenarioActionLabel(
+        private fun compactActionLabel(
             label: String,
             value: String,
         ): String {
-            if (scenario.scenarioId != "pet-grooming") return label
-            val combined = "$label $value"
-            val lower = combined.lowercase()
-            val timeLabel = Regex("""\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b""", RegexOption.IGNORE_CASE)
-                .find(combined)
-                ?.value
-                ?.replace(Regex("""\s+"""), " ")
-                ?.trim()
-            return when {
-                combined.contains("好的") ->
-                    "好的"
-                lower.contains("defer") || lower.contains("later") || lower.contains("next week") || combined.contains("改天") ->
-                    "改天再说"
-                lower.contains("book_afternoon_bath_only") || combined.contains("下午5点") || combined.contains("下午五点") ->
-                    "约下午5点"
-                lower.contains("book_0900") ->
-                    "约9点"
-                lower.contains("book") || lower.contains("booking") || lower.contains("appointment") ->
-                    timeLabel?.let { "约${normalizeTimeLabel(it)}" } ?: "预约"
-                lower.contains("modify") || lower.contains("change") || combined.contains("修改") ->
-                    "修改计划"
-                lower.contains("afternoon") || combined.contains("下午") ->
-                    "问下午"
-                lower.contains("another shop") || lower.contains("other shop") || combined.contains("换一家") ->
-                    "换一家"
-                lower.contains("cancel") || combined.contains("取消") ->
-                    "取消"
-                else -> label.substringBefore("（")
-                    .substringBefore("(")
-                    .substringBefore("->")
-                    .substringBefore("=>")
-                    .substringBefore("→")
-                    .trim()
-                    .ifBlank { label }
-            }.let { it.take(24).trim() }
+            if (!OneHourScenarioPolicy.matches(scenario.scenarioId)) return label
+            return OneHourScenarioPolicy.compactActionLabel(label, value)
         }
-
-        private fun normalizeTimeLabel(value: String): String =
-            value
-                .replace(Regex(""":00\b"""), "点")
-                .replace(Regex("""\s*(am|AM)\b"""), "")
-                .replace(Regex("""\s*(pm|PM)\b"""), "")
-                .trim()
 
         private fun inferDecisionPrompt(content: String): DecisionPrompt? {
             val text = content.trim()
@@ -1699,14 +1961,8 @@ class AgentExperienceViewModel
         }
 
         private fun compactDecisionPromptText(text: String): String {
-            if (scenario.scenarioId == "pet-grooming" && isAfternoonBathOnlyTradeoff(text)) {
-                return "PetSmart说下午5点后可以，只够洗澡，不含除毛。要改约下午5点吗？"
-            }
-            if (scenario.scenarioId == "pet-grooming" && isGroomingTimeTradeoff(text)) {
-                return "PetSmart说明天上午9点可以洗澡和除毛，下午5点后只够洗澡。要约9点吗？"
-            }
-            if (scenario.scenarioId == "pet-grooming" && inferScenarioActions(text).isNotEmpty()) {
-                return "明天周日了，还是照常给麒麟约洗澡么？"
+            if (OneHourScenarioPolicy.matches(scenario.scenarioId)) {
+                return OneHourScenarioPolicy.compactDecisionPromptText(text) ?: text
             }
             return text
         }
@@ -1747,18 +2003,9 @@ class AgentExperienceViewModel
                 .toList()
 
         private fun compactInlineActionLabel(value: String): String {
-            if (scenario.scenarioId == "pet-grooming" && isNonActionGroomingFact(value)) return ""
+            if (OneHourScenarioPolicy.matches(scenario.scenarioId) && OneHourScenarioPolicy.isNonActionFact(value)) return ""
             val timeRange = Regex("""^\d{1,2}:\d{2}\s*[–-]\s*\d{1,2}:\d{2}""").find(value)?.value
             return timeRange ?: value
-        }
-
-        private fun isNonActionGroomingFact(value: String): Boolean {
-            val lower = value.lowercase()
-            return lower.contains("booking secured") ||
-                lower.contains("medium dog") ||
-                lower.contains("basic bath") ||
-                lower.contains("de-shedding care") ||
-                lower.contains("time changed")
         }
 
         private fun stripLeadingActionIcon(value: String): String =
@@ -1829,16 +2076,11 @@ class AgentExperienceViewModel
             return "$prefix-$eventCounter"
         }
 
-        private enum class GroomingMilestone {
-            HOME_CONFIRMED,
-            PAYMENT_COMPLETED,
-            EXPENSE_RECORDED,
-        }
-
         private companion object {
             private const val TAG = "AgentExperienceViewModel"
             private const val MAX_TRACE_LINES = 80
             private const val MAX_SIGNALS = 12
+            private const val MAX_SYSTEM_EVENTS = 14
             private const val MAX_PARTICIPANTS = 5
             private const val MAX_CONVERSATION_ITEMS = 40
             private const val MAX_TASK_LOGS = 80
@@ -1846,21 +2088,23 @@ class AgentExperienceViewModel
             private const val MAX_AUTO_CONTINUATIONS = 14
             private const val AUTO_TRIGGER_DELAY_MS = 5_000L
             private const val SCENARIO_CLOCK_TICK_MS = 60_000L
+            private const val CLOCK_LOOP_INTERVAL_MS = 1_000L
+            private const val CALL_CONNECTED_DISPLAY_MS = 6_000L
             private const val CLOCK_ADVANCE_STEPS = 30
             private const val CLOCK_ADVANCE_STEP_MS = 1_000L
             private const val TOOL_ROUND_LIMIT_PREFIX = "Stopped: too many tool call rounds"
+            private const val SCRIPTED_ACTION_PREFIX = "MULTI:"
+            private const val ONE_HOUR_SCENARIO_ID = "one_hour_aio"
             private val INITIAL_SCENARIO_CLOCK: LocalDateTime = LocalDateTime.of(2027, 4, 25, 13, 0)
+            private val SCENARIO_DAY_LABELS = listOf("Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri")
             private val CLOCK_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
             private val CLOCK_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.US)
             private val BLUEPRINT_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MM/dd HH:mm", Locale.US)
-            private val SCENARIO_DAY_NAMES = listOf(
-                "Saturday" to "Sat",
-                "Sunday" to "Sun",
-                "Monday" to "Mon",
-                "Tuesday" to "Tue",
-                "Wednesday" to "Wed",
-                "Thursday" to "Thu",
-                "Friday" to "Fri",
-            )
         }
     }
+
+private fun ActionButton.toAgentDecisionAction(): AgentDecisionAction =
+    AgentDecisionAction(
+        label = label,
+        value = value,
+    )

@@ -7,6 +7,9 @@ import com.mobilebot.domain.profile.UserProfileStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -36,6 +39,8 @@ class SystemRuntime
         private val callLog = mutableListOf<Map<String, Any?>>()
         private val runtimeProfiles: List<SystemRuntimeProfile> by lazy { loadRuntimeProfiles() }
         private var selectedServiceName: String? = null
+        private val _events = MutableSharedFlow<SystemRuntimeEvent>(extraBufferCapacity = 16)
+        val events: SharedFlow<SystemRuntimeEvent> = _events.asSharedFlow()
 
         fun bootstrap() {
             runBlocking {
@@ -77,6 +82,16 @@ class SystemRuntime
         suspend fun sendSmsFromTool(params: JSONObject): SystemRuntimeResult = sendSms(params)
 
         fun searchContactsFromTool(params: JSONObject): SystemRuntimeResult = contacts(params)
+
+        fun scenarioEvents(scenarioId: String): List<SystemRuntimeScriptEvent> =
+            runtimeProfiles
+                .flatMap { it.scenarioEvents }
+                .filter { it.scenarioId == scenarioId }
+                .sortedBy { it.time }
+
+        suspend fun publishEvent(event: SystemRuntimeEvent) {
+            _events.emit(event)
+        }
 
         suspend fun waitForSms(params: JSONObject): SystemRuntimeResult {
             val watch = synchronized(smsLock) {
@@ -1041,6 +1056,7 @@ class SystemRuntime
             val contacts: List<SystemContact>,
             val places: Map<String, Map<String, Any?>>,
             val services: List<RuntimeService>,
+            val scenarioEvents: List<SystemRuntimeScriptEvent>,
             val smsResponses: List<SmsResponseRule>,
             val outboundSmsGuards: List<OutboundSmsGuard>,
             val paymentAmountRules: List<PaymentAmountRule>,
@@ -1064,6 +1080,7 @@ class SystemRuntime
                 contacts = parseContacts(root.optJSONArray("contacts")),
                 places = parsePlaces(root.optJSONObject("places")),
                 services = parseServices(root.optJSONArray("services")),
+                scenarioEvents = parseScenarioEvents(root.optJSONArray("scenarioEvents")),
                 smsResponses = parseSmsResponses(root.optJSONArray("smsResponses")),
                 outboundSmsGuards = parseOutboundSmsGuards(root.optJSONArray("outboundSmsGuards")),
                 paymentAmountRules = parsePaymentAmountRules(root.optJSONArray("paymentAmountRules")),
@@ -1118,6 +1135,29 @@ class SystemRuntime
                             aliases = obj.optStringList("aliases"),
                             endpoint = endpoint,
                             actionAliases = obj.optJSONObject("actionAliases")?.toStringMap().orEmpty(),
+                        ),
+                    )
+                }
+            }
+
+        private fun parseScenarioEvents(arr: JSONArray?): List<SystemRuntimeScriptEvent> =
+            buildList {
+                if (arr == null) return@buildList
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id").trim()
+                    val time = obj.optString("time").trim()
+                    val type = obj.optString("type").trim()
+                    if (id.isBlank() || time.isBlank() || type.isBlank()) continue
+                    add(
+                        SystemRuntimeScriptEvent(
+                            id = id,
+                            time = time,
+                            type = type,
+                            source = obj.optString("source").trim(),
+                            title = obj.optString("title").trim(),
+                            body = obj.optString("body").trim(),
+                            scenarioId = obj.optString("scenarioId").ifBlank { "one_hour_aio" },
                         ),
                     )
                 }

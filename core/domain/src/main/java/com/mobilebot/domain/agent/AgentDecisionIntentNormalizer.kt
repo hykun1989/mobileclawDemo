@@ -1,4 +1,4 @@
-package com.mobilebot.chat
+﻿package com.mobilebot.domain.agent
 
 import com.mobilebot.domain.LlmConfigurator
 import com.mobilebot.network.LlmClient
@@ -7,26 +7,18 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import javax.inject.Inject
 
-class ScenarioDecisionIntentNormalizer
+class AgentDecisionIntentNormalizer
     @Inject
     constructor(
         private val llm: LlmClient,
         private val llmConfigurator: LlmConfigurator,
     ) {
-        suspend fun normalize(input: ScenarioDecisionInput): ScenarioDecisionResult {
-            val candidates = ScenarioDecisionIntent.forScenario(input.scenarioId)
-            if (candidates.isEmpty()) {
-                return ScenarioDecisionResult(
-                    intent = ScenarioDecisionIntent.Freeform,
-                    displayText = input.displayText,
-                    agentText = ScenarioDecisionIntent.Freeform.agentText(input.rawText),
-                    usedFallback = true,
-                )
-            }
+        suspend fun normalize(input: AgentDecisionInput): AgentDecisionResult {
+            val candidates = input.candidateIntents.ifEmpty { AgentDecisionIntents.defaults }
 
             val directIntent = directIntent(input, candidates)
             if (directIntent != null) {
-                return ScenarioDecisionResult(
+                return AgentDecisionResult(
                     intent = directIntent,
                     displayText = input.displayText,
                     agentText = directIntent.agentText(input.rawText),
@@ -47,8 +39,8 @@ class ScenarioDecisionIntentNormalizer
                 }.getOrNull()
             }
 
-            val intent = llmIntent ?: ScenarioDecisionIntent.Freeform
-            return ScenarioDecisionResult(
+            val intent = llmIntent ?: AgentDecisionIntents.Freeform
+            return AgentDecisionResult(
                 intent = intent,
                 displayText = input.displayText,
                 agentText = intent.agentText(input.rawText),
@@ -57,9 +49,9 @@ class ScenarioDecisionIntentNormalizer
         }
 
         private fun directIntent(
-            input: ScenarioDecisionInput,
-            candidates: List<ScenarioDecisionIntent>,
-        ): ScenarioDecisionIntent? {
+            input: AgentDecisionInput,
+            candidates: List<AgentDecisionIntent>,
+        ): AgentDecisionIntent? {
             val display = input.displayText.trim()
             val raw = input.rawText.trim()
             val exact = candidates.firstOrNull { intent ->
@@ -82,8 +74,8 @@ class ScenarioDecisionIntentNormalizer
         }
 
         private fun buildMessages(
-            input: ScenarioDecisionInput,
-            candidates: List<ScenarioDecisionIntent>,
+            input: AgentDecisionInput,
+            candidates: List<AgentDecisionIntent>,
         ): List<LlmMessage> {
             val candidateText = candidates.joinToString("\n") { "- ${it.id}: ${it.meaning}" }
             val actionsText = input.presentedActions.joinToString("\n") {
@@ -101,7 +93,7 @@ class ScenarioDecisionIntentNormalizer
                 LlmMessage(
                     role = "user",
                     content = """
-                        Scenario: ${input.scenarioId}
+                        Context: ${input.contextId}
                         Prompt shown to user:
                         ${input.promptText}
 
@@ -123,8 +115,8 @@ class ScenarioDecisionIntentNormalizer
 
         private fun parseIntent(
             raw: String,
-            candidates: List<ScenarioDecisionIntent>,
-        ): ScenarioDecisionIntent? {
+            candidates: List<AgentDecisionIntent>,
+        ): AgentDecisionIntent? {
             val ids = candidates.associateBy { it.id }
             val content = raw.trim()
             val idFromJson = extractJsonObject(content)?.optString("intent")?.trim()
@@ -170,135 +162,75 @@ class ScenarioDecisionIntentNormalizer
         }
     }
 
-data class ScenarioDecisionInput(
-    val scenarioId: String,
+data class AgentDecisionInput(
+    val contextId: String,
     val promptText: String,
-    val presentedActions: List<ActionButton>,
+    val presentedActions: List<AgentDecisionAction>,
+    val candidateIntents: List<AgentDecisionIntent>,
     val displayText: String,
     val rawText: String,
 )
 
-data class ScenarioDecisionResult(
-    val intent: ScenarioDecisionIntent,
+data class AgentDecisionAction(
+    val label: String,
+    val value: String,
+)
+
+data class AgentDecisionIntent(
+    val id: String,
+    val displayLabel: String,
+    val meaning: String,
+    val agentInstruction: String? = null,
+    val includeRawText: Boolean = false,
+) {
+    val command: String = "USER_INTENT:$id"
+
+    fun agentText(rawText: String): String =
+        when {
+            agentInstruction != null -> "$command\n$agentInstruction"
+            includeRawText -> "$command\nUSER_TEXT:${rawText.trim()}"
+            else -> command
+        }
+}
+
+data class AgentDecisionResult(
+    val intent: AgentDecisionIntent,
     val displayText: String,
     val agentText: String,
     val usedFallback: Boolean,
 )
 
-sealed class ScenarioDecisionIntent(
-    val id: String,
-    val displayLabel: String,
-    val meaning: String,
-) {
-    val command: String = "USER_INTENT:$id"
-
-    open fun agentText(rawText: String): String = command
-
-    data object PetGroomingKeepCurrentWeek : ScenarioDecisionIntent(
-        id = "pet_grooming.keep_current_week",
-        displayLabel = "好的",
-        meaning = "Y wants to keep Kylin's regular grooming appointment this week.",
-    )
-
-    data object PetGroomingDeferCurrentWeek : ScenarioDecisionIntent(
-        id = "pet_grooming.defer_current_week",
-        displayLabel = "改天再说",
-        meaning = "Y wants to skip or postpone this week's Kylin grooming run.",
-    )
-
-    data object PetGroomingBookNine : ScenarioDecisionIntent(
-        id = "pet_grooming.book_0900",
-        displayLabel = "约9点",
-        meaning = "Y chooses the 9:00 PetSmart slot and authorizes routine downstream coordination.",
-    )
-
-    data object PetGroomingAskAfternoon : ScenarioDecisionIntent(
-        id = "pet_grooming.ask_afternoon",
-        displayLabel = "问下午",
-        meaning = "Y wants the agent to ask PetSmart about afternoon availability before deciding.",
-    ) {
-        override fun agentText(rawText: String): String =
-            """
-            $command
-            NEXT_OPERATION: The next assistant step must be a tool call, not user-facing prose. Call system_send_sms to PetSmart with this exact Chinese message: `请问明天下午5点以后可以只安排基础洗澡服务吗？` Then call system_wait_for_sms for PetSmart's reply. Do not repeat the previous options before the new PetSmart SMS is received. Do not write English words such as booking or bath-only in the SMS body.
-            """.trimIndent()
-    }
-
-    data object PetGroomingBookAfternoonBathOnly : ScenarioDecisionIntent(
-        id = "pet_grooming.book_afternoon_bath_only",
-        displayLabel = "约下午5点",
-        meaning = "Y accepts the afternoon bath-only PetSmart slot and authorizes routine downstream coordination.",
-    ) {
-        override fun agentText(rawText: String): String =
-            """
-            $command
-            FINAL_SELECTION: Y has accepted the afternoon bath-only PetSmart slot. This is not another availability question.
-            NEXT_OPERATION: The next assistant step must be a tool call, not user-facing prose. Call system_send_sms to PetSmart with this exact confirmation message: `您好，确认明天下午5点后给 Kylin 预约洗澡，不做除毛。谢谢。` Then call system_wait_for_sms for PetSmart's booking confirmation. Do not ask PetSmart about availability again. Do not show another action prompt for the afternoon tradeoff. Do not ask Y to confirm the same option again.
-            """.trimIndent()
-    }
-
-    data object PetGroomingFindAlternative : ScenarioDecisionIntent(
-        id = "pet_grooming.find_alternative_shop",
-        displayLabel = "换一家",
-        meaning = "Y wants to look for another grooming shop.",
-    ) {
-        override fun agentText(rawText: String): String =
-            """
-            $command
-            NEXT_OPERATION: The next assistant step must be a tool call, not user-facing prose. Use device_system service_call with serviceId `pet_salon_search` to list nearby grooming shops, then choose a non-PetSmart shop that supports both extra-large dog bathing and de-shedding. Prefer Harbor Paws Salon if it is present because it supports both required services. Call get_pet_shop_detail for the chosen shop, then send SMS to that shop with this Chinese message: `请问明天下午2点可以给 Kylin 安排基础洗澡和去浮毛服务吗？她是30公斤以上的伯恩山犬。` Then call system_wait_for_sms for that shop's reply. Use the chosen shop name consistently in later Driver, payment, accounting, and summary steps.
-            """.trimIndent()
-    }
-
-    data object ModifyPlan : ScenarioDecisionIntent(
+object AgentDecisionIntents {
+    val ModifyPlan = AgentDecisionIntent(
         id = "general.modify_plan",
         displayLabel = "修改计划",
         meaning = "The user wants to modify the current plan.",
     )
 
-    data object Continue : ScenarioDecisionIntent(
+    val Continue = AgentDecisionIntent(
         id = "general.continue",
         displayLabel = "继续",
         meaning = "The user wants the agent to continue with the current plan or next safe step.",
     )
 
-    data object RewritePlan : ScenarioDecisionIntent(
+    val RewritePlan = AgentDecisionIntent(
         id = "general.rewrite_plan",
         displayLabel = "重写计划",
         meaning = "The user wants the agent to rewrite the current plan.",
     )
 
-    data object Cancel : ScenarioDecisionIntent(
+    val Cancel = AgentDecisionIntent(
         id = "general.cancel",
         displayLabel = "取消",
         meaning = "The user wants to cancel the current action.",
     )
 
-    data object Freeform : ScenarioDecisionIntent(
+    val Freeform = AgentDecisionIntent(
         id = "general.freeform",
         displayLabel = "Freeform",
         meaning = "The reply does not map cleanly to a declared intent.",
-    ) {
-        override fun agentText(rawText: String): String =
-            "$command\nUSER_TEXT:${rawText.trim()}"
-    }
+        includeRawText = true,
+    )
 
-    companion object {
-        fun forScenario(scenarioId: String): List<ScenarioDecisionIntent> =
-            when (scenarioId) {
-                "pet-grooming" -> listOf(
-                    PetGroomingKeepCurrentWeek,
-                    PetGroomingDeferCurrentWeek,
-                    PetGroomingBookNine,
-                    PetGroomingAskAfternoon,
-                    PetGroomingBookAfternoonBathOnly,
-                    PetGroomingFindAlternative,
-                    Continue,
-                    ModifyPlan,
-                    RewritePlan,
-                    Cancel,
-                    Freeform,
-                )
-                else -> listOf(Continue, ModifyPlan, RewritePlan, Cancel, Freeform)
-            }
-    }
+    val defaults = listOf(Continue, ModifyPlan, RewritePlan, Cancel, Freeform)
 }

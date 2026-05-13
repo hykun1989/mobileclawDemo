@@ -2,7 +2,7 @@
 
 ## 概述
 
-基于 `mobile-wash-dog-skill-plan.md` 的需求，为 mobileclawDemo 项目适配了宠物洗护服务 Skill，并在测试过程中修复了多个 Bug、增强了多项功能。
+基于 `mobile-wash-dog-skill-plan.md` 的需求，为 mobileclaw 项目适配了宠物洗护服务 Skill，并在测试过程中修复了多个 Bug、增强了多项功能。
 
 ---
 

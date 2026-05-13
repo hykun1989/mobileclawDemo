@@ -27,7 +27,7 @@ class SkillExecutorReferenceTest {
             allowed-tools:
               - call_service
             references:
-              - references/mock-pet-store-data.md
+              - references/store-data.md
               - references/missing.md
             ---
 
@@ -44,14 +44,14 @@ class SkillExecutorReferenceTest {
         val loader = MapSkillContentLoader(
             mapOf(
                 entry.contentPath to skillContent,
-                "assets://skills/md/arrange-pet-store-service/references/mock-pet-store-data.md" to "Mock locations and slots",
+                "assets://skills/md/arrange-pet-store-service/references/store-data.md" to "Locations and slots",
             ),
         )
         val executor = SkillExecutor(
             skillRegistry = registry,
             contentLoader = loader,
             eligibilityChecker = SkillEligibilityChecker(AllCapabilitiesProbe()),
-            subAgentRunner = SubAgentRunner(FakeLlmClient(), Provider<ToolRegistry> { error("not used") }),
+            subAgentRunner = SubAgentRunner(StubLlmClient(), Provider<ToolRegistry> { error("not used") }),
             toolRegistryProvider = Provider<ToolRegistry> { error("not used") },
         )
 
@@ -60,7 +60,7 @@ class SkillExecutorReferenceTest {
         assertTrue(result.ok)
         assertTrue(result.message.contains("# Main Skill Body"))
         assertTrue(result.message.contains("## Reference Materials"))
-        assertTrue(result.message.contains("Mock locations and slots"))
+        assertTrue(result.message.contains("Locations and slots"))
         assertTrue(result.message.contains("Reference file could not be loaded"))
         assertTrue(result.message.contains("Allowed tools for this skill: call_service"))
     }
@@ -74,8 +74,8 @@ private class MapSkillContentLoader(
     override suspend fun loadContent(path: String): String? = content[path]
 }
 
-private class FakeLlmClient : LlmClient {
-    override var defaultModel: String = "fake"
+private class StubLlmClient : LlmClient {
+    override var defaultModel: String = "test-model"
 
     override suspend fun chat(
         messages: List<LlmMessage>,

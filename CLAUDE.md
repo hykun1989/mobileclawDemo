@@ -224,6 +224,12 @@ Virtual mode provides realistic mock data (9 contacts, Shanghai Bund location, 4
 ## Testing
 
 - **JUnit 4** for JVM unit tests, placed in `<module>/src/test/java/`
+<<<<<<< multi-scenarios-demo
+- 11 test files across `core:domain` (9), `core:bridge` (1), `core:data` (1)
+- Integration tests use `RecordingDeviceCapabilityBridge` + `Recording*Bridge` test doubles in `core/domain/src/test/java/com/mobilebot/domain/testdoubles/`
+- **Maestro** UI automation in `maestro/flows/` (requires separate installation)
+- No instrumented tests currently
+=======
 - **No instrumented tests** — all tests run on JVM without Android SDK
 - **13 test files** across `core:domain` (9), `core:bridge` (1), `core:data` (1), plus integration tests in `core:domain`
 - **`org.json:json:20231013`** dependency for JVM `JSONObject` (replaces Android SDK stub)
@@ -242,6 +248,7 @@ Located in `core/domain/src/test/java/com/mobilebot/domain/testdoubles/`:
 ### Maestro UI Automation
 
 `maestro/flows/` contains 6 YAML flows (basic chat, settings, open_url, smart contact, location, clipboard). testTags: `chat_input`, `send_button`, `settings_button`, `message_list`, `settings_api_key`, `settings_base_url`, `settings_model`, `settings_save`.
+>>>>>>> main
 
 ## Adding new code
 

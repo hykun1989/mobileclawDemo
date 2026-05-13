@@ -527,10 +527,10 @@ private fun WorkbenchArea(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
-        if (frame.taskCards.isEmpty() && frame.recentSystemEvents.isEmpty()) {
+        if (frame.taskCards.isEmpty()) {
             item {
                 Text(
-                    text = "等待系统事件。",
+                    text = if (frame.recentSystemEvents.isEmpty()) "等待系统事件。" else "正在处理系统事件。",
                     color = AgentMuted,
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
@@ -552,7 +552,7 @@ private fun WorkbenchArea(
                 TaskCardRow(task = task, onClick = { onSelectTask(task.id) })
             }
         }
-        if (frame.recentSystemEvents.isNotEmpty()) {
+        if (frame.taskCards.isNotEmpty() && frame.recentSystemEvents.isNotEmpty()) {
             item {
                 Text(
                     text = "系统事件",

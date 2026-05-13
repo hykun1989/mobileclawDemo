@@ -140,6 +140,7 @@ class AgentExperienceViewModel
 
         fun accelerateClockUntilNextEvent() {
             if (deferredRetriggerInProgress) return
+            if (shouldPauseLiveClock()) return
             if (fastClockJob?.isActive == true) return
             val target = nextDeliverableTimelineEvent()?.triggerAt ?: return
             clockMode = ScenarioClockMode.FastUntilNextEvent

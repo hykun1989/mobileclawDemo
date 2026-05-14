@@ -276,9 +276,9 @@ object PetGroomingTaskSurface {
 
     private val DRIVER = ScenarioParticipant(
         id = "driver",
-        label = "陈",
+        label = "DR",
         displayName = "老陈",
-        role = "driver",
+        role = "private_driver",
     )
 
     private val PROPERTY = ScenarioParticipant(

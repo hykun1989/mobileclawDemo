@@ -1396,12 +1396,18 @@ class AgentExperienceViewModel
                 else -> "service"
             }
             return AgentParticipant(
-                id = "$role-${trimmed.lowercase().replace(Regex("""\s+"""), "-")}",
+                id = participantId(trimmed, role),
                 label = participantLabel(trimmed),
                 displayName = trimmed,
                 role = role,
             )
         }
+
+        private fun participantId(name: String, role: String): String =
+            when (role) {
+                "private_driver" -> "driver"
+                else -> "$role-${name.lowercase().replace(Regex("""\s+"""), "-")}"
+            }
 
         private fun participantLabel(name: String): String {
             val label = OneHourScenarioPolicy.labelForContact(name)

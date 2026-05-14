@@ -28,7 +28,7 @@ object PetGroomingContacts {
     fun labelForContact(contact: String): String {
         val lower = contact.lowercase()
         return when {
-            lower.contains("driver") || contact.contains("司机") -> "D"
+            lower.contains("driver") || contact.contains("司机") -> "DR"
             lower.contains("petsmart") -> "PS"
             shopNameIn(contact) != null -> shopNameIn(contact).orEmpty().take(2).uppercase()
             contact.isNotBlank() -> contact.take(2).uppercase()

@@ -89,8 +89,9 @@ class OneHourScenarioFlowTest {
     @Test
     fun acceptedPetSlotCommandReferencesIncludeSmsAndListener() {
         val commands = OneHourScenarioFlow().acceptPetCareSlotCommands("可以")
+        val update = commands.first() as ScenarioAgentCommand.UpdateTask
 
-        assertTrue(commands.first() is ScenarioAgentCommand.UpdateTask)
+        assertEquals(listOf("PS", "DR"), update.update.participants?.map { it.label })
         assertEquals(
             listOf("system_update", "PetSmart", "Driver", "Driver"),
             commands.map {

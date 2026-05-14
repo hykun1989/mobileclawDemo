@@ -714,7 +714,7 @@ private fun SessionArea(
                 .weight(1f),
             state = listState,
             contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.Bottom),
         ) {
             items(messages) { message ->
                 ConversationBubble(message)

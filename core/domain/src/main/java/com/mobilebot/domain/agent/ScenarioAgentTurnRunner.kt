@@ -1,5 +1,6 @@
 package com.mobilebot.domain.agent
 
+import android.util.Log
 import com.mobilebot.domain.AgentLoop
 import com.mobilebot.domain.LlmConfigurator
 import com.mobilebot.domain.repository.SessionRepository
@@ -42,6 +43,12 @@ class ScenarioAgentTurnRunner
             )
 
             val outputToolCalls = response.toolCalls.filter { it.name == EmitScenarioCommandsTool.NAME }
+            Log.i(
+                TAG,
+                "turn session=$sessionKey type=${input.turnType} task=${input.taskId.orEmpty()} " +
+                    "toolCalls=${response.toolCalls.size} outputCalls=${outputToolCalls.size} " +
+                    "contentChars=${response.content?.length ?: 0}",
+            )
             return if (outputToolCalls.size == 1) {
                 sessions.appendAssistantMessage(
                     sessionKey = sessionKey,
@@ -69,18 +76,22 @@ class ScenarioAgentTurnRunner
             toolCall: LlmToolCall,
             rawText: String,
         ): ScenarioAgentTurnResult {
+            Log.i(TAG, "parse tool_call session=$sessionKey id=${toolCall.id} args=${preview(toolCall.argumentsJson)}")
             val parsed = ScenarioCommandCodec.parse(toolCall.argumentsJson)
             if (!parsed.isOk) {
                 val error = parsed.error ?: "命令解析失败。"
+                Log.w(TAG, "parse error session=$sessionKey id=${toolCall.id}: $error")
                 sessions.appendToolMessage(sessionKey, error, toolCall.id, toolCall.name)
                 return ScenarioAgentTurnResult(error = error, rawText = rawText)
             }
             val batch = parsed.batch ?: ScenarioCommandBatch(emptyList())
             duplicateCommandError(batch)?.let { error ->
+                Log.w(TAG, "duplicate command session=$sessionKey id=${toolCall.id}: $error")
                 sessions.appendToolMessage(sessionKey, error, toolCall.id, toolCall.name)
                 return ScenarioAgentTurnResult(error = error, rawText = rawText)
             }
             val resultJson = ScenarioCommandCodec.toJson(batch)
+            Log.i(TAG, "parsed commands session=$sessionKey id=${toolCall.id} count=${batch.commands.size}")
             sessions.appendToolMessage(sessionKey, resultJson, toolCall.id, toolCall.name)
             return ScenarioAgentTurnResult(commands = batch.commands, rawText = rawText)
         }
@@ -114,6 +125,7 @@ class ScenarioAgentTurnRunner
             命令必须严格来自白名单：create_task, update_task, send_sms, wait_sms, create_reminder, ask_user, switch_task, complete_task。
             SystemRuntime 给出的内容是已经发生的外部事实；你负责理解事实、结合 Skill 指令和用户记忆，决定任务更新和工具动作。
             只有确实需要用户决策时才使用 ask_user。
+            ask_user 命令必须提供 decision.text 和 decision.actions；每个 action 必须包含 label 和 key。
             用户可见文案使用中文，保持简短、真实、低打扰。
             """.trimIndent()
 
@@ -202,8 +214,12 @@ class ScenarioAgentTurnRunner
         }
 
         companion object {
+            private const val TAG = "ScenarioAgentRunner"
             private const val MAX_HISTORY = 12
             private const val MAX_TOKENS = 1800
+
+            private fun preview(value: String): String =
+                value.replace('\n', ' ').take(600)
         }
     }
 

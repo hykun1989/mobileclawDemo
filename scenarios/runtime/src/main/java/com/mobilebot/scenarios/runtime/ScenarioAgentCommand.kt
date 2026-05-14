@@ -212,7 +212,37 @@ object ScenarioCommandCodec {
                     .put("scheduledFor", JSONObject().put("type", "string"))
                     .put("summary", JSONObject().put("type", "string"))
                     .put("finalSummary", JSONObject().put("type", "string"))
-                    .put("decision", JSONObject().put("type", "object")),
+                    .put("decision", decisionSchema()),
+            )
+
+    private fun decisionSchema(): JSONObject =
+        JSONObject()
+            .put("type", "object")
+            .put("additionalProperties", false)
+            .put("required", JSONArray(listOf("text", "actions")))
+            .put(
+                "properties",
+                JSONObject()
+                    .put("text", JSONObject().put("type", "string"))
+                    .put(
+                        "actions",
+                        JSONObject()
+                            .put("type", "array")
+                            .put("minItems", 1)
+                            .put("items", actionSchema()),
+                    ),
+            )
+
+    private fun actionSchema(): JSONObject =
+        JSONObject()
+            .put("type", "object")
+            .put("additionalProperties", false)
+            .put("required", JSONArray(listOf("label", "key")))
+            .put(
+                "properties",
+                JSONObject()
+                    .put("label", JSONObject().put("type", "string"))
+                    .put("key", JSONObject().put("type", "string")),
             )
 
     private fun parseCommand(

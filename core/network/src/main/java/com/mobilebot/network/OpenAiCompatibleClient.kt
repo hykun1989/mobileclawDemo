@@ -1,5 +1,6 @@
 package com.mobilebot.network
 
+import android.os.SystemClock
 import android.util.Log
 import com.mobilebot.model.StreamEvent
 import com.mobilebot.model.ToolDefinition
@@ -18,6 +19,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -29,6 +31,7 @@ class OpenAiCompatibleClient
 constructor() : LlmClient {
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
+    private val requestCounter = AtomicLong(0L)
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -50,36 +53,60 @@ constructor() : LlmClient {
         model: String?,
         maxTokens: Int,
     ): LlmResponse {
+        val requestId = requestCounter.incrementAndGet()
+        val resolvedModel = normalizeLegacyGlmModel(model ?: defaultModel)
         val body =
             buildRequestBody(
                 messages = messages,
                 tools = tools,
-                model = normalizeLegacyGlmModel(model ?: defaultModel),
+                model = resolvedModel,
                 maxTokens = maxTokens,
                 stream = false,
+                requestId = requestId,
             )
 
         var lastException: Exception? = null
         for (attempt in 0 until MAX_RETRIES) {
             try {
-                return executeSingleChat(body)
+                return executeSingleChat(body, requestId, attempt + 1)
             } catch (e: IOException) {
                 lastException = e
                 if (!isTransientError(e) || attempt == MAX_RETRIES - 1) throw wrapWithFriendlyMessage(e)
                 val delayMs = RETRY_BASE_MS * (1L shl attempt)
-                Log.w(TAG, "Transient error on attempt ${attempt + 1}/$MAX_RETRIES, retrying in ${delayMs}ms", e)
+                Log.w(
+                    TAG,
+                    "[$requestId] transient error on attempt ${attempt + 1}/$MAX_RETRIES, " +
+                        "retrying in ${delayMs}ms: ${e.javaClass.simpleName}: ${e.message}",
+                    e,
+                )
                 kotlinx.coroutines.delay(delayMs)
             }
         }
         throw wrapWithFriendlyMessage(lastException ?: IOException("request failed"))
     }
 
-    private suspend fun executeSingleChat(body: String): LlmResponse {
+    private suspend fun executeSingleChat(
+        body: String,
+        requestId: Long,
+        attempt: Int,
+    ): LlmResponse {
         val req = buildPostRequest(body)
         val call = client.newCall(req)
+        val startedAt = SystemClock.elapsedRealtime()
+
+        fun elapsedMs(): Long = SystemClock.elapsedRealtime() - startedAt
+
+        Log.i(
+            TAG,
+            "[$requestId] enqueue attempt=$attempt host=${req.url.host} path=${req.url.encodedPath} " +
+                "bodyBytes=${body.toByteArray(Charsets.UTF_8).size}",
+        )
 
         return suspendCancellableCoroutine { cont ->
-            cont.invokeOnCancellation { call.cancel() }
+            cont.invokeOnCancellation {
+                Log.w(TAG, "[$requestId] cancelled attempt=$attempt after=${elapsedMs()}ms")
+                call.cancel()
+            }
 
             fun resumeErr(t: Throwable) {
                 if (!cont.isActive) return
@@ -90,6 +117,12 @@ constructor() : LlmClient {
             call.enqueue(
                 object : Callback {
                     override fun onFailure(call: Call, e: IOException) {
+                        Log.w(
+                            TAG,
+                            "[$requestId] failure attempt=$attempt after=${elapsedMs()}ms " +
+                                "canceled=${call.isCanceled()} ${e.javaClass.simpleName}: ${e.message}",
+                            e,
+                        )
                         resumeErr(e)
                     }
 
@@ -97,13 +130,19 @@ constructor() : LlmClient {
                         try {
                             response.use { resp ->
                                 val raw = resp.body?.string().orEmpty()
+                                Log.i(
+                                    TAG,
+                                    "[$requestId] response attempt=$attempt code=${resp.code} " +
+                                        "after=${elapsedMs()}ms bodyChars=${raw.length} " +
+                                        "contentType=${resp.header("content-type").orEmpty()}",
+                                )
 
                                 if (!resp.isSuccessful) {
+                                    val error = formatHttpErrorBody(resp.code, raw)
+                                    Log.w(TAG, "[$requestId] http_error attempt=$attempt ${error.take(500)}")
                                     if (cont.isActive) {
                                         runCatching {
-                                            cont.resumeWithException(
-                                                IOException(formatHttpErrorBody(resp.code, raw)),
-                                            )
+                                            cont.resumeWithException(IOException(error))
                                         }
                                     }
                                     return@use
@@ -111,14 +150,31 @@ constructor() : LlmClient {
 
                                 try {
                                     val parsed = parseNonStreamResponse(raw)
+                                    Log.i(
+                                        TAG,
+                                        "[$requestId] parsed attempt=$attempt finishReason=${parsed.finishReason.orEmpty()} " +
+                                            "toolCalls=${parsed.toolCalls.size} contentChars=${parsed.content?.length ?: 0}",
+                                    )
                                     if (cont.isActive) {
                                         runCatching { cont.resume(parsed) }
                                     }
                                 } catch (e: Exception) {
+                                    Log.w(
+                                        TAG,
+                                        "[$requestId] parse_error attempt=$attempt after=${elapsedMs()}ms " +
+                                            "${e.javaClass.simpleName}: ${e.message}",
+                                        e,
+                                    )
                                     resumeErr(e)
                                 }
                             }
                         } catch (t: Throwable) {
+                            Log.w(
+                                TAG,
+                                "[$requestId] response_handler_error attempt=$attempt after=${elapsedMs()}ms " +
+                                    "${t.javaClass.simpleName}: ${t.message}",
+                                t,
+                            )
                             resumeErr(t)
                         }
                     }
@@ -286,6 +342,7 @@ constructor() : LlmClient {
         model: String,
         maxTokens: Int,
         stream: Boolean,
+        requestId: Long? = null,
     ): String {
         val declaredToolNames =
             tools
@@ -331,10 +388,8 @@ constructor() : LlmClient {
 
         val json = root.toString()
 
-        Log.i(
-            TAG,
-            "chat/completions: model=$model messages=${messages.size} tools=${tools?.size ?: 0} stream=$stream",
-        )
+        val prefix = requestId?.let { "[$it] " }.orEmpty()
+        Log.i(TAG, "${prefix}chat/completions: model=$model messages=${messages.size} tools=${tools?.size ?: 0} stream=$stream")
         if (Log.isLoggable(TAG, Log.DEBUG)) {
             val preview = if (json.length <= 3000) json else json.take(3000) + "…"
             Log.d(TAG, "request json = $preview")

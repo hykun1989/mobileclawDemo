@@ -127,6 +127,12 @@ class ScenarioAgentTurnRunner
                 appendLine(eventFact.ifBlank { "(none)" })
                 appendLine("currentTask:")
                 appendLine(currentTaskSnapshot.ifBlank { "(none)" })
+                appendLine("allTasks:")
+                appendLine(allTaskSnapshots.ifBlank { "(none)" })
+                appendLine("timelineQueue:")
+                appendLine(timelineDigest.ifBlank { "(none)" })
+                appendLine("recentToolResults:")
+                appendLine(recentToolResults.ifBlank { "(none)" })
                 appendLine("userInput:")
                 appendLine(userInput.ifBlank { "(none)" })
                 appendLine("normalizedIntent:")
@@ -209,6 +215,9 @@ data class ScenarioAgentTurnInput(
     val taskId: String? = null,
     val eventFact: String = "",
     val currentTaskSnapshot: String = "",
+    val allTaskSnapshots: String = "",
+    val timelineDigest: String = "",
+    val recentToolResults: String = "",
     val userInput: String = "",
     val normalizedIntent: AgentDecisionIntent? = null,
     val presentedActions: List<AgentDecisionAction> = emptyList(),

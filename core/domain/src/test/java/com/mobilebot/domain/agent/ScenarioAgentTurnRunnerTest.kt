@@ -109,6 +109,28 @@ class ScenarioAgentTurnRunnerTest {
     }
 
     @Test
+    fun acceptsEmptyCommandBatchFromToolCall() = runBlocking {
+        val result = runner(
+            StubLlmClient(
+                LlmResponse(
+                    content = "",
+                    toolCalls = listOf(
+                        LlmToolCall(
+                            id = "call-1",
+                            name = EmitScenarioCommandsTool.NAME,
+                            argumentsJson = """{"commands":[]}""",
+                        ),
+                    ),
+                    finishReason = "tool_calls",
+                ),
+            ),
+        ).run(baseInput())
+
+        assertTrue(result.isOk)
+        assertTrue(result.commands.isEmpty())
+    }
+
+    @Test
     fun rejectsMultipleOutputToolCallsInOneTurn() = runBlocking {
         val command = """{"commands":[{"type":"switch_task","taskId":"pet-task"}]}"""
         val result = runner(
@@ -185,6 +207,39 @@ class ScenarioAgentTurnRunnerTest {
     }
 
     @Test
+    fun includesPlannerContextDigestsInPrompt() = runBlocking {
+        val llm = StubLlmClient(
+            LlmResponse(
+                content = "",
+                toolCalls = listOf(
+                    LlmToolCall(
+                        id = "call-1",
+                        name = EmitScenarioCommandsTool.NAME,
+                        argumentsJson = """{"commands":[{"type":"switch_task","taskId":"pet-task"}]}""",
+                    ),
+                ),
+                finishReason = "tool_calls",
+            ),
+        )
+
+        runner(llm).run(
+            baseInput(
+                allTaskSnapshots = "id: task-a\nstatus: RUNNING",
+                timelineDigest = "currentEvent: ella-call\nupcoming:\n- 13:11 ella-call-ended",
+                recentToolResults = "pet-task: 13:05 sent sms",
+            ),
+        )
+
+        val prompt = llm.requests.single().last { it.role == "user" }.content.orEmpty()
+        assertTrue(prompt.contains("allTasks:"))
+        assertTrue(prompt.contains("id: task-a"))
+        assertTrue(prompt.contains("timelineQueue:"))
+        assertTrue(prompt.contains("currentEvent: ella-call"))
+        assertTrue(prompt.contains("recentToolResults:"))
+        assertTrue(prompt.contains("pet-task: 13:05 sent sms"))
+    }
+
+    @Test
     fun keepsSessionHistoriesIsolatedBySessionId() = runBlocking {
         val sessions = MemorySessionRepository()
         val llm = StubLlmClient(
@@ -233,6 +288,9 @@ class ScenarioAgentTurnRunnerTest {
         userInput: String = "",
         normalizedIntent: AgentDecisionIntent? = null,
         presentedActions: List<AgentDecisionAction> = emptyList(),
+        allTaskSnapshots: String = "",
+        timelineDigest: String = "",
+        recentToolResults: String = "",
     ): ScenarioAgentTurnInput =
         ScenarioAgentTurnInput(
             sessionId = sessionId,
@@ -242,6 +300,9 @@ class ScenarioAgentTurnRunnerTest {
             taskId = taskId,
             eventFact = "收到宠物店短信。",
             currentTaskSnapshot = "尚未创建任务。",
+            allTaskSnapshots = allTaskSnapshots,
+            timelineDigest = timelineDigest,
+            recentToolResults = recentToolResults,
             userInput = userInput,
             normalizedIntent = normalizedIntent,
             presentedActions = presentedActions,

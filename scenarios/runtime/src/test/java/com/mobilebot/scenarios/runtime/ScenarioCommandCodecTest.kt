@@ -72,6 +72,14 @@ class ScenarioCommandCodecTest {
     }
 
     @Test
+    fun parsesEmptyCommandBatchForNoopTurns() {
+        val result = ScenarioCommandCodec.parse("""{"commands":[]}""")
+
+        assertTrue(result.isOk)
+        assertTrue(result.batch?.commands.orEmpty().isEmpty())
+    }
+
+    @Test
     fun encodesRoundTrippableBatch() {
         val batch = ScenarioCommandBatch(
             listOf(

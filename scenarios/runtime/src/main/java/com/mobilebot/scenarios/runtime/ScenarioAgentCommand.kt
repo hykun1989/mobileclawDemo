@@ -119,7 +119,7 @@ object ScenarioCommandCodec {
                     "commands",
                     JSONObject()
                         .put("type", "array")
-                        .put("minItems", 1)
+                        .put("minItems", 0)
                         .put(
                             "items",
                             JSONObject()

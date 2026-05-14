@@ -205,6 +205,22 @@ class OneHourScenarioFlow {
                 }
             }
 
+        fun commandReferences(
+            event: SystemRuntimeEvent,
+            effects: List<OneHourFlowEffect>,
+        ): List<ScenarioAgentCommand> {
+            val commands = commandReferences(effects)
+            return when (event.id) {
+                "driver-1320-confirm" -> commands + ScenarioAgentCommand.CreateReminder(
+                    taskId = PetGroomingTaskSurface.TASK_ID,
+                    title = "送 Kylin 下楼",
+                    body = "司机老陈即将到楼下。",
+                    scheduledFor = "2027-04-25T13:20:00",
+                )
+                else -> commands
+            }
+        }
+
         fun taskIdFromEffects(effects: List<OneHourFlowEffect>): String? =
             effects.firstNotNullOfOrNull { effect ->
                 when (effect) {

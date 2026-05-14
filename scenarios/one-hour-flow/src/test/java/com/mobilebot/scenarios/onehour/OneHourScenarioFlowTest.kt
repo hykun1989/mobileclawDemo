@@ -107,6 +107,40 @@ class OneHourScenarioFlowTest {
     }
 
     @Test
+    fun driverConfirmationReferenceCommandsIncludeReminderCreation() {
+        val flow = OneHourScenarioFlow()
+        flow.acceptPetCareSlot("可以")
+        val event = sms(
+            id = "driver-1320-confirm",
+            source = "Driver",
+            body = "好的，我 13:20 到楼下等 Kylin。",
+        )
+        val commands = OneHourScenarioFlow.commandReferences(event, flow.handle(event))
+        val reminder = commands.single { it is ScenarioAgentCommand.CreateReminder } as ScenarioAgentCommand.CreateReminder
+
+        assertTrue(commands.any { it is ScenarioAgentCommand.UpdateTask })
+        assertEquals("pet-grooming-live", reminder.taskId)
+        assertEquals("2027-04-25T13:20:00", reminder.scheduledFor)
+    }
+
+    @Test
+    fun incomingCallReferenceCommandsCanBeEmptyForPlannerNoop() {
+        val event = IncomingCallEvent(
+            id = "ella-call",
+            occurredAt = now.withHour(13).withMinute(9),
+            source = "Ella",
+            title = "Ella 来电",
+            body = "Ella 来电，通话中提到家庭采购。",
+            contact = "Ella",
+        )
+        val effects = OneHourScenarioFlow().handle(event)
+        val commands = OneHourScenarioFlow.commandReferences(event, effects)
+
+        assertTrue(effects.single() is OneHourFlowEffect.ShowSystemLayer)
+        assertTrue(commands.isEmpty())
+    }
+
+    @Test
     fun unclearPetSlotReplyCreatesBlockedClarificationCommand() {
         val command = OneHourScenarioFlow()
             .openSlotClarificationCommands("都可以")

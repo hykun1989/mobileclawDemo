@@ -14,6 +14,7 @@ import com.mobilebot.domain.agent.AgentSessionRoute
 import com.mobilebot.domain.agent.AgentDecisionInput
 import com.mobilebot.domain.agent.AgentDecisionIntent
 import com.mobilebot.domain.agent.AgentDecisionIntentNormalizer
+import com.mobilebot.domain.agent.ScenarioCommandGuard
 import com.mobilebot.domain.agent.ScenarioAgentTurnInput
 import com.mobilebot.domain.agent.ScenarioAgentTurnRunner
 import com.mobilebot.domain.interaction.ActionPromptCodec
@@ -1685,20 +1686,19 @@ class AgentExperienceViewModel
             referenceEffects: List<OneHourFlowEffect>,
         ) {
             val taskId = OneHourScenarioFlow.taskIdFromEffects(referenceEffects) ?: _frame.value.activeTaskId
-            val referenceCommands = OneHourScenarioFlow.commandReferences(referenceEffects)
-            if (referenceCommands.isEmpty()) {
-                return
-            }
+            val referenceCommands = OneHourScenarioFlow.commandReferences(event, referenceEffects)
             val sessionId = sessionIdForTask(taskId ?: event.id)
             val timeText = blueprintTimeText(event.occurredAt)
-            _frame.update {
-                it.copy(
-                    statusLabel = "Thinking",
-                    progressLine = it.progressLine.copy(
-                        label = "Thinking",
-                        detail = event.title,
-                    ),
-                )
+            if (referenceCommands.isNotEmpty()) {
+                _frame.update {
+                    it.copy(
+                        statusLabel = "Thinking",
+                        progressLine = it.progressLine.copy(
+                            label = "Thinking",
+                            detail = event.title,
+                        ),
+                    )
+                }
             }
             val result = if (settings.getApiKey().isBlank()) {
                 null
@@ -1713,6 +1713,9 @@ class AgentExperienceViewModel
                             taskId = taskId,
                             eventFact = event.toAgentFact(),
                             currentTaskSnapshot = taskSnapshotFor(taskId),
+                            allTaskSnapshots = allTaskSnapshotsForPlanner(),
+                            timelineDigest = timelineQueueDigestForPlanner(event),
+                            recentToolResults = recentToolResultsForPlanner(),
                             memoryDigest = memoryDigestForScenario(),
                             skillInstruction = OneHourScenarioPolicy.orchestrationInstruction(
                                 eventId = event.id,
@@ -1724,12 +1727,28 @@ class AgentExperienceViewModel
                     )
                 }
             }
-            if (result?.isOk == true && result.commands.isNotEmpty()) {
-                applyScenarioAgentCommands(result.commands, timeText)
+            val fallbackEffects = referenceEffects.filterNot { it.isSystemLayerEffect() }
+            if (result?.isOk == true && (result.commands.isNotEmpty() || referenceCommands.isEmpty())) {
+                val guardError = ScenarioCommandGuard.validate(
+                    commands = result.commands,
+                    knownTaskIds = taskStates.keys,
+                    referenceCommands = referenceCommands,
+                )
+                if (guardError == null) {
+                    applyScenarioAgentCommands(result.commands, timeText)
+                } else {
+                    appendScenarioAgentError(taskId, timeText, guardError)
+                    applyOneHourFlowEffects(fallbackEffects, timeText)
+                }
             } else {
-                val reason = result?.error ?: "未配置 API Key，使用本地验收基线。"
+                if (referenceCommands.isEmpty() && fallbackEffects.isEmpty()) return
+                val reason = if (result?.isOk == true && result.commands.isEmpty()) {
+                    "LLM 未返回参考命令，使用本地验收基线。"
+                } else {
+                    result?.error ?: "未配置 API Key，使用本地验收基线。"
+                }
                 appendScenarioAgentError(taskId, timeText, reason)
-                applyOneHourFlowEffects(referenceEffects.filterNot { it.isSystemLayerEffect() }, timeText)
+                applyOneHourFlowEffects(fallbackEffects, timeText)
             }
         }
 
@@ -1767,6 +1786,53 @@ class AgentExperienceViewModel
                 task.conversationItems.takeLast(6).forEach { appendLine("- ${it.role}: ${it.text}") }
             }
         }
+
+        private fun allTaskSnapshotsForPlanner(): String {
+            if (taskStates.isEmpty()) return ""
+            return taskStates.values.joinToString("\n\n") { task ->
+                buildString {
+                    appendLine("id: ${task.id}")
+                    appendLine("title: ${task.title}")
+                    appendLine("subtitle: ${task.subtitle}")
+                    appendLine("status: ${task.status}")
+                    appendLine("progress: ${task.progressLine.label} ${task.progressLine.detail}")
+                    task.taskLogs.lastOrNull()?.let { appendLine("latestLog: ${it.timeText} ${it.text}") }
+                }.trim()
+            }
+        }
+
+        private fun timelineQueueDigestForPlanner(currentEvent: SystemRuntimeEvent? = null): String {
+            val upcoming = timelineScript
+                .asSequence()
+                .filter { it.id !in deliveredTimelineEvents || it.id == currentEvent?.id }
+                .sortedBy { it.triggerAt }
+                .take(6)
+                .map { event ->
+                    val state = when {
+                        event.id == currentEvent?.id -> "current"
+                        shouldHoldTimelineEvent(event) -> "held"
+                        else -> "pending"
+                    }
+                    "- ${blueprintTimeText(event.triggerAt)} ${event.id} [$state] ${event.title}"
+                }
+                .toList()
+            return buildString {
+                appendLine("clock: ${blueprintTimeText(scenarioClock)}")
+                appendLine("currentEvent: ${currentEvent?.id ?: "(none)"}")
+                if (upcoming.isEmpty()) {
+                    appendLine("upcoming: (none)")
+                } else {
+                    appendLine("upcoming:")
+                    upcoming.forEach { appendLine(it) }
+                }
+            }.trim()
+        }
+
+        private fun recentToolResultsForPlanner(): String =
+            taskStates.values
+                .flatMap { task -> task.taskLogs.takeLast(4).map { "${task.id}: ${it.timeText} ${it.text}" } }
+                .takeLast(10)
+                .joinToString("\n")
 
         private fun appendScenarioAgentError(
             taskId: String?,
@@ -2026,6 +2092,9 @@ class AgentExperienceViewModel
                             normalizedIntent = normalizedIntent,
                             presentedActions = presentedActions,
                             currentTaskSnapshot = taskSnapshotFor(taskId),
+                            allTaskSnapshots = allTaskSnapshotsForPlanner(),
+                            timelineDigest = timelineQueueDigestForPlanner(),
+                            recentToolResults = recentToolResultsForPlanner(),
                             memoryDigest = memoryDigestForScenario(),
                             skillInstruction = OneHourScenarioPolicy.userDecisionInstruction(
                                 userText = displayText,
@@ -2038,8 +2107,18 @@ class AgentExperienceViewModel
                 }
             }
             if (result?.isOk == true && result.commands.isNotEmpty()) {
-                pendingSelectedActionLabel = null
-                applyScenarioAgentCommands(result.commands, timeText)
+                val guardError = ScenarioCommandGuard.validate(
+                    commands = result.commands,
+                    knownTaskIds = taskStates.keys,
+                    referenceCommands = referenceCommands,
+                )
+                if (guardError == null) {
+                    pendingSelectedActionLabel = null
+                    applyScenarioAgentCommands(result.commands, timeText)
+                } else {
+                    appendScenarioAgentError(taskId, timeText, guardError)
+                    fallback()
+                }
                 handleDueTimelineEvents()
                 _frame.update { it.copy(busy = false, activeActionValue = null) }
             } else {

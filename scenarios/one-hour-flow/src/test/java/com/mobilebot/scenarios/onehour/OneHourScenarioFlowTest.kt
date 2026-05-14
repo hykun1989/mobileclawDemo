@@ -89,6 +89,30 @@ class OneHourScenarioFlowTest {
     }
 
     @Test
+    fun plannerDriverSideEffectUnlocksPetFollowupEvents() {
+        val flow = OneHourScenarioFlow()
+        flow.updateRuntimeStateFromPlannerCommands(
+            listOf(
+                ScenarioAgentCommand.SendSms(
+                    taskId = "pet-grooming-live",
+                    to = "Driver",
+                    message = "13:20 来接 Kylin。",
+                ),
+            ),
+        )
+
+        val driverEffects = flow.handle(
+            sms(
+                id = "driver-1320-confirm",
+                source = "Driver",
+                body = "好的，我 13:20 到楼下等 Kylin。",
+            ),
+        )
+
+        assertTrue(driverEffects.single() is OneHourFlowEffect.UpdateTask)
+    }
+
+    @Test
     fun acceptedPetSlotCommandReferencesIncludeSmsAndListener() {
         val commands = OneHourScenarioFlow().acceptPetCareSlotCommands("可以")
         val update = commands.first() as ScenarioAgentCommand.UpdateTask
@@ -143,10 +167,10 @@ class OneHourScenarioFlowTest {
 
     @Test
     fun userDecisionPlannerPolicyDoesNotEmbedClarificationReferenceText() {
-        val commands = OneHourScenarioFlow().openSlotClarificationCommands("狗死了")
         val policyJson = OneHourScenarioFlow.userDecisionPlannerPolicyJson(
             userText = "狗死了",
-            referenceCommands = commands,
+            taskId = "pet-grooming-live",
+            displayedActions = listOf("可以" to "accept", "不改了" to "decline"),
         )
         val instruction = OneHourScenarioPolicy.userDecisionInstruction(
             userText = "狗死了",
@@ -154,31 +178,59 @@ class OneHourScenarioFlowTest {
         )
 
         assertTrue(instruction.contains("plannerPolicy"))
-        assertTrue(instruction.contains("deceased"))
-        assertTrue(instruction.contains("stop this grooming task"))
+        assertTrue(instruction.contains("对象不存在"))
+        assertTrue(instruction.contains("更新任务为停止/完成"))
         assertFalse(instruction.contains("你是想改到 14:00，还是保留原来的 17:00？"))
         assertFalse(instruction.contains("referenceCommands"))
+        val policy = JSONObject(policyJson)
+        assertEquals("PetSmart", policy.getJSONArray("authorizedSms").getJSONObject(0).getString("to"))
+        assertEquals("Driver", policy.getJSONArray("authorizedSms").getJSONObject(1).getString("to"))
+        assertEquals("可以", policy.getJSONArray("visibleDecisionActions").getJSONObject(0).getString("label"))
     }
 
     @Test
-    fun systemEventPlannerPolicyAuthorizesOnlyReferenceSideEffects() {
-        val flow = OneHourScenarioFlow()
-        flow.acceptPetCareSlot("可以")
+    fun systemEventPlannerPolicyAuthorizesScenarioSideEffectsWithoutReferences() {
         val event = sms(
             id = "driver-1320-confirm",
             source = "Driver",
             body = "好的，我 13:20 到楼下等 Kylin。",
         )
-        val commands = OneHourScenarioFlow.commandReferences(event, flow.handle(event))
-        val policy = JSONObject(OneHourScenarioFlow.plannerPolicyJson(event, commands))
+        val policy = JSONObject(OneHourScenarioFlow.plannerPolicyJson(event))
 
         assertEquals("system_event", policy.getString("turn"))
         assertEquals("driver-1320-confirm", policy.getString("eventId"))
+        assertEquals("pet-grooming-live", policy.getJSONArray("taskIds").getString(0))
         assertEquals(
             "2027-04-25T13:20:00",
             policy.getJSONArray("authorizedReminders").getJSONObject(0).getString("scheduledFor"),
         )
         assertFalse(policy.toString().contains("司机老陈即将到楼下。"))
+    }
+
+    @Test
+    fun plannerPolicyAuthorizesTaskWithoutReferenceCommands() {
+        val event = sms(
+            id = "petsmart-open-slot",
+            source = "PetSmart",
+            body = "14:00 客人计划有变，现在可以安排 Kylin 洗澡和去浮毛。",
+        )
+        val policy = JSONObject(OneHourScenarioFlow.plannerPolicyJson(event))
+
+        assertEquals("pet-grooming-live", policy.getJSONArray("taskIds").getString(0))
+        assertEquals("可以", policy.getJSONArray("visibleDecisionActions").getJSONObject(0).getString("label"))
+        assertEquals(0, policy.getJSONArray("authorizedSms").length())
+        assertEquals(0, policy.getJSONArray("authorizedReminders").length())
+    }
+
+    @Test
+    fun nonLayerScriptEventsHavePlannerTaskAuthorization() {
+        val missing = scriptEvents()
+            .map { it.toRuntimeEvent() }
+            .filterNot { it.id == "ella-call" }
+            .filter { OneHourScenarioFlow.authorizedTaskIdsForEvent(it).isEmpty() }
+            .map { it.id }
+
+        assertTrue("Script events missing planner task authorization: $missing", missing.isEmpty())
     }
 
     @Test

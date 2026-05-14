@@ -57,6 +57,22 @@ data class ScenarioCommandBatch(
     val commands: List<ScenarioAgentCommand>,
 )
 
+data class ScenarioCommandAuthorization(
+    val taskIds: Set<String> = emptySet(),
+    val sms: Set<ScenarioSmsAuthorization> = emptySet(),
+    val reminders: Set<ScenarioReminderAuthorization> = emptySet(),
+)
+
+data class ScenarioSmsAuthorization(
+    val taskId: String,
+    val to: String,
+)
+
+data class ScenarioReminderAuthorization(
+    val taskId: String,
+    val scheduledFor: String,
+)
+
 data class ScenarioCommandParseResult(
     val batch: ScenarioCommandBatch?,
     val error: String? = null,
@@ -122,14 +138,82 @@ object ScenarioCommandCodec {
                         .put("minItems", 0)
                         .put(
                             "items",
-                            JSONObject()
-                                .put("type", "object")
-                                .put("additionalProperties", true)
-                                .put("required", JSONArray(listOf("type", "taskId"))),
+                            JSONObject().put(
+                                "oneOf",
+                                JSONArray(
+                                    listOf(
+                                        commandSchema(
+                                            type = "create_task",
+                                            required = listOf("type", "taskId", "title"),
+                                        ),
+                                        commandSchema(
+                                            type = "update_task",
+                                            required = listOf("type", "taskId"),
+                                        ),
+                                        commandSchema(
+                                            type = "send_sms",
+                                            required = listOf("type", "taskId", "to", "message"),
+                                        ),
+                                        commandSchema(
+                                            type = "wait_sms",
+                                            required = listOf("type", "taskId", "contact", "reason"),
+                                        ),
+                                        commandSchema(
+                                            type = "create_reminder",
+                                            required = listOf("type", "taskId", "title", "body", "scheduledFor"),
+                                        ),
+                                        commandSchema(
+                                            type = "ask_user",
+                                            required = listOf("type", "taskId", "decision"),
+                                        ),
+                                        commandSchema(
+                                            type = "switch_task",
+                                            required = listOf("type", "taskId"),
+                                        ),
+                                        commandSchema(
+                                            type = "complete_task",
+                                            required = listOf("type", "taskId", "summary"),
+                                        ),
+                                    ),
+                                ),
+                            ),
                         ),
                 ),
             )
             .toString()
+
+    private fun commandSchema(
+        type: String,
+        required: List<String>,
+    ): JSONObject =
+        JSONObject()
+            .put("type", "object")
+            .put("additionalProperties", true)
+            .put("required", JSONArray(required))
+            .put(
+                "properties",
+                JSONObject()
+                    .put("type", JSONObject().put("type", "string").put("enum", JSONArray(listOf(type))))
+                    .put("taskId", JSONObject().put("type", "string"))
+                    .put("title", JSONObject().put("type", "string"))
+                    .put("subtitle", JSONObject().put("type", "string"))
+                    .put(
+                        "status",
+                        JSONObject()
+                            .put("type", "string")
+                            .put("enum", JSONArray(listOf("RUNNING", "BLOCKED", "DONE"))),
+                    )
+                    .put("to", JSONObject().put("type", "string"))
+                    .put("message", JSONObject().put("type", "string"))
+                    .put("displayName", JSONObject().put("type", "string"))
+                    .put("contact", JSONObject().put("type", "string"))
+                    .put("reason", JSONObject().put("type", "string"))
+                    .put("body", JSONObject().put("type", "string"))
+                    .put("scheduledFor", JSONObject().put("type", "string"))
+                    .put("summary", JSONObject().put("type", "string"))
+                    .put("finalSummary", JSONObject().put("type", "string"))
+                    .put("decision", JSONObject().put("type", "object")),
+            )
 
     private fun parseCommand(
         type: String,
@@ -175,13 +259,18 @@ object ScenarioCommandCodec {
         index: Int,
     ): ScenarioTaskSeed {
         val progress = obj.optJSONObject("progress") ?: defaultProgress()
+        val summary = visibleSummary(obj)
+        val conversations = parseConversations(obj.optJSONArray("conversations"))
+            .ifEmpty { summary?.let { listOf(ScenarioConversation(ScenarioSurfaceRole.AGENT, it)) }.orEmpty() }
+        val logs = parseLogs(obj.optJSONArray("logs"))
+            .ifEmpty { summary?.let { listOf(ScenarioLog(it)) }.orEmpty() }
         return ScenarioTaskSeed(
             taskId = obj.requiredString("taskId", index),
             title = obj.requiredString("title", index),
             subtitle = obj.optString("subtitle"),
             status = parseStatus(obj.optString("status").ifBlank { "RUNNING" }),
-            conversations = parseConversations(obj.optJSONArray("conversations")),
-            logs = parseLogs(obj.optJSONArray("logs")),
+            conversations = conversations,
+            logs = logs,
             participants = parseParticipants(obj.optJSONArray("participants")),
             progress = parseProgress(progress),
             decision = obj.optJSONObject("decision")?.let { parseDecision(it, index) },
@@ -194,12 +283,17 @@ object ScenarioCommandCodec {
         index: Int,
     ): ScenarioTaskUpdate {
         val progress = obj.optJSONObject("progress") ?: defaultProgress()
+        val summary = visibleSummary(obj)
+        val conversations = parseConversations(obj.optJSONArray("conversations"))
+            .ifEmpty { summary?.let { listOf(ScenarioConversation(ScenarioSurfaceRole.AGENT, it)) }.orEmpty() }
+        val logs = parseLogs(obj.optJSONArray("logs"))
+            .ifEmpty { summary?.let { listOf(ScenarioLog(it)) }.orEmpty() }
         return ScenarioTaskUpdate(
             taskId = obj.requiredString("taskId", index),
             subtitle = obj.optString("subtitle"),
             status = parseStatus(obj.optString("status").ifBlank { "RUNNING" }),
-            conversations = parseConversations(obj.optJSONArray("conversations")),
-            logs = parseLogs(obj.optJSONArray("logs")),
+            conversations = conversations,
+            logs = logs,
             participants = obj.optJSONArray("participants")?.let(::parseParticipants),
             participantsToAdd = parseParticipants(obj.optJSONArray("participantsToAdd")),
             participantsToRemove = stringList(obj.optJSONArray("participantsToRemove")),
@@ -207,9 +301,14 @@ object ScenarioCommandCodec {
             decision = obj.optJSONObject("decision")?.let { parseDecision(it, index) },
             activeActionValue = obj.optString("activeActionValue").ifBlank { null },
             timeline = parseTimeline(obj.optJSONArray("timeline")),
-            finalSummary = obj.optString("finalSummary").ifBlank { null },
+            finalSummary = obj.optString("finalSummary").ifBlank { summary.takeIf { obj.optString("status") == "DONE" } },
         )
     }
+
+    private fun visibleSummary(obj: JSONObject): String? =
+        obj.optString("summary")
+            .ifBlank { obj.optString("subtitle") }
+            .ifBlank { null }
 
     private fun parseDecision(
         obj: JSONObject,

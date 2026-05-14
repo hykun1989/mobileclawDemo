@@ -5,8 +5,11 @@ import com.mobilebot.scenarios.familyshopping.FamilyShoppingTaskSurface
 import com.mobilebot.scenarios.healthsupply.HealthSupplyTaskSurface
 import com.mobilebot.scenarios.petgrooming.PetGroomingTaskSurface
 import com.mobilebot.scenarios.runtime.ScenarioAgentCommand
+import com.mobilebot.scenarios.runtime.ScenarioCommandAuthorization
 import com.mobilebot.scenarios.runtime.ScenarioLog
 import com.mobilebot.scenarios.runtime.ScenarioProgress
+import com.mobilebot.scenarios.runtime.ScenarioReminderAuthorization
+import com.mobilebot.scenarios.runtime.ScenarioSmsAuthorization
 import com.mobilebot.scenarios.runtime.ScenarioSurfaceStatus
 import com.mobilebot.scenarios.runtime.ScenarioTaskSeed
 import com.mobilebot.scenarios.runtime.ScenarioTaskUpdate
@@ -57,6 +60,13 @@ class OneHourScenarioFlow {
     }
 
     fun isPetCareAccepted(): Boolean = petCareAccepted
+
+    fun updateRuntimeStateFromPlannerCommands(commands: List<ScenarioAgentCommand>) {
+        when {
+            commands.any { it.opensPetCareFollowup() } -> petCareAccepted = true
+            commands.any { it.closesPetCareFollowup() } -> petCareAccepted = false
+        }
+    }
 
     fun acceptPetCareSlot(label: String): OneHourFlowEffect.UpdateTask {
         petCareAccepted = true
@@ -133,6 +143,28 @@ class OneHourScenarioFlow {
             else -> emptyList()
         }
 
+    fun systemLayerEffects(event: SystemRuntimeEvent): List<OneHourFlowEffect> =
+        when (event) {
+            is IncomingCallEvent -> handleIncomingCall(event)
+            is CallEndedEvent -> listOf(
+                OneHourFlowEffect.ClearActiveCall,
+                OneHourFlowEffect.ClearSystemLayer(setOf(event.id, event.id.removeSuffix("-ended"))),
+            )
+            is ReminderFiredEvent -> if (petCareAccepted) {
+                listOf(
+                    OneHourFlowEffect.ShowSystemLayer(
+                        id = event.id,
+                        title = event.title,
+                        body = event.body,
+                        actionLabel = "OK",
+                    ),
+                )
+            } else {
+                emptyList()
+            }
+            else -> emptyList()
+        }
+
     private fun handleIncomingSms(event: IncomingSmsEvent): List<OneHourFlowEffect> =
         when (event.id) {
             "petsmart-open-slot" -> listOf(OneHourFlowEffect.CreateTask(PetGroomingTaskSurface.openSlotSeed(event.body)))
@@ -197,6 +229,26 @@ class OneHourScenarioFlow {
     private fun ifPetAccepted(update: ScenarioTaskUpdate): List<OneHourFlowEffect> =
         if (petCareAccepted) listOf(OneHourFlowEffect.UpdateTask(update)) else emptyList()
 
+    private fun ScenarioAgentCommand.opensPetCareFollowup(): Boolean =
+        when (this) {
+            is ScenarioAgentCommand.SendSms ->
+                taskId == PetGroomingTaskSurface.TASK_ID && to.equals("Driver", ignoreCase = true)
+            is ScenarioAgentCommand.WaitSms ->
+                taskId == PetGroomingTaskSurface.TASK_ID && contact.equals("Driver", ignoreCase = true)
+            is ScenarioAgentCommand.CreateReminder -> taskId == PetGroomingTaskSurface.TASK_ID
+            else -> false
+        }
+
+    private fun ScenarioAgentCommand.closesPetCareFollowup(): Boolean =
+        when (this) {
+            is ScenarioAgentCommand.CompleteTask -> taskId == PetGroomingTaskSurface.TASK_ID
+            is ScenarioAgentCommand.CreateTask ->
+                seed.taskId == PetGroomingTaskSurface.TASK_ID && seed.status == ScenarioSurfaceStatus.DONE
+            is ScenarioAgentCommand.UpdateTask ->
+                update.taskId == PetGroomingTaskSurface.TASK_ID && update.status == ScenarioSurfaceStatus.DONE
+            else -> false
+        }
+
     companion object {
         fun commandReferences(effects: List<OneHourFlowEffect>): List<ScenarioAgentCommand> =
             effects.mapNotNull { effect ->
@@ -225,9 +277,11 @@ class OneHourScenarioFlow {
 
         fun plannerPolicyJson(
             event: SystemRuntimeEvent,
-            referenceCommands: List<ScenarioAgentCommand>,
         ): String =
-            basePlannerPolicy(referenceCommands)
+            basePlannerPolicy(
+                authorization = commandAuthorizationForEvent(event),
+                decisionActions = decisionActionsForEvent(event),
+            )
                 .put("turn", "system_event")
                 .put("eventId", event.id)
                 .put(
@@ -237,7 +291,8 @@ class OneHourScenarioFlow {
                             "Treat eventFact as already observed system state.",
                             "Use current task state and timeline queue to decide whether commands are needed.",
                             "Return empty commands when the event only needs system-layer display.",
-                            "Do not copy fallback wording; write concise task updates that fit the observed fact.",
+                            "plannerPolicy is runtime authorization, not a deterministic answer key.",
+                            "Write concise task updates that fit the observed fact.",
                         ),
                     ),
                 )
@@ -245,9 +300,13 @@ class OneHourScenarioFlow {
 
         fun userDecisionPlannerPolicyJson(
             userText: String,
-            referenceCommands: List<ScenarioAgentCommand>,
+            taskId: String?,
+            displayedActions: List<Pair<String, String>>,
         ): String =
-            basePlannerPolicy(referenceCommands)
+            basePlannerPolicy(
+                authorization = commandAuthorizationForUserDecision(taskId),
+                decisionActions = displayedActions,
+            )
                 .put("turn", "user_decision")
                 .put("userText", userText)
                 .put(
@@ -257,38 +316,32 @@ class OneHourScenarioFlow {
                             "Interpret the user's latest text first; do not force it into the existing buttons.",
                             "If the user clearly accepts 14:00, continue the pet grooming coordination.",
                             "If the user clearly keeps the original slot, finish this change request without Driver or reminder side effects.",
-                            "If the user reports the pet is unavailable, deceased, or no longer needs grooming, stop this grooming task, clear decision actions, and do not ask the 14:00/17:00 clarification again.",
+                            "If the user changes the task premise or says the request no longer needs action, stop or complete this task and clear decision actions.",
                             "If the reply is truly unclear and still about scheduling, ask one concise clarification question.",
-                            "Do not copy fallback wording; write the smallest command batch that matches the user's intent.",
+                            "Do not rely on local deterministic wording; write the smallest command batch that matches the user's intent.",
                         ),
                     ),
                 )
                 .toString()
 
-        private fun basePlannerPolicy(referenceCommands: List<ScenarioAgentCommand>): JSONObject {
-            val taskIds = referenceCommands.map { it.taskId }.filter { it.isNotBlank() }.distinct()
-            val decisionActions = referenceCommands.flatMap { command ->
-                when (command) {
-                    is ScenarioAgentCommand.CreateTask -> command.seed.decision?.actions.orEmpty()
-                    is ScenarioAgentCommand.UpdateTask -> command.update.decision?.actions.orEmpty()
-                    is ScenarioAgentCommand.AskUser -> command.decision.actions
-                    else -> emptyList()
-                }
-            }.distinctBy { it.key }
-            val smsTargets = referenceCommands.filterIsInstance<ScenarioAgentCommand.SendSms>()
+        private fun basePlannerPolicy(
+            authorization: ScenarioCommandAuthorization,
+            decisionActions: List<Pair<String, String>> = emptyList(),
+        ): JSONObject {
+            val taskIds = authorization.taskIds.filter { it.isNotBlank() }.distinct()
+            val smsTargets = authorization.sms
                 .map { JSONObject().put("taskId", it.taskId).put("to", it.to) }
-            val reminders = referenceCommands.filterIsInstance<ScenarioAgentCommand.CreateReminder>()
+            val reminders = authorization.reminders
                 .map { JSONObject().put("taskId", it.taskId).put("scheduledFor", it.scheduledFor) }
 
             return JSONObject()
-                .put("mode", "planner_policy_not_reference_answer")
-                .put("fallback", "local deterministic commands exist only for failure fallback and guard authorization")
+                .put("mode", "llm_planner_runtime_policy")
                 .put("taskIds", JSONArray(taskIds))
                 .put("allowedStatuses", JSONArray(listOf("RUNNING", "BLOCKED", "DONE")))
                 .put(
-                    "existingDecisionActionKeys",
-                    JSONArray(decisionActions.map {
-                        JSONObject().put("key", it.key)
+                    "visibleDecisionActions",
+                    JSONArray(decisionActions.distinctBy { it.second }.map {
+                        JSONObject().put("label", it.first).put("key", it.second)
                     }),
                 )
                 .put("authorizedSms", JSONArray(smsTargets))
@@ -299,6 +352,46 @@ class OneHourScenarioFlow {
                 )
         }
 
+        fun commandAuthorizationForEvent(event: SystemRuntimeEvent): ScenarioCommandAuthorization =
+            ScenarioCommandAuthorization(
+                taskIds = authorizedTaskIdsForEvent(event),
+                reminders = when (event.id) {
+                    "driver-1320-confirm" -> setOf(
+                        ScenarioReminderAuthorization(
+                            taskId = PetGroomingTaskSurface.TASK_ID,
+                            scheduledFor = "2027-04-25T13:20:00",
+                        ),
+                    )
+                    else -> emptySet()
+                },
+            )
+
+        fun commandAuthorizationForUserDecision(taskId: String?): ScenarioCommandAuthorization {
+            val cleanTaskId = taskId?.takeIf { it.isNotBlank() }
+                ?: return ScenarioCommandAuthorization()
+            return ScenarioCommandAuthorization(
+                taskIds = setOf(cleanTaskId),
+                sms = if (cleanTaskId == PetGroomingTaskSurface.TASK_ID) {
+                    setOf(
+                        ScenarioSmsAuthorization(PetGroomingTaskSurface.TASK_ID, "PetSmart"),
+                        ScenarioSmsAuthorization(PetGroomingTaskSurface.TASK_ID, "Driver"),
+                    )
+                } else {
+                    emptySet()
+                },
+            )
+        }
+
+        private fun decisionActionsForEvent(event: SystemRuntimeEvent): List<Pair<String, String>> =
+            when (event.id) {
+                "petsmart-open-slot" -> PetGroomingTaskSurface.openSlotSeed(event.body)
+                    .decision
+                    ?.actions
+                    .orEmpty()
+                    .map { it.label to it.key }
+                else -> emptyList()
+            }
+
         fun taskIdFromEffects(effects: List<OneHourFlowEffect>): String? =
             effects.firstNotNullOfOrNull { effect ->
                 when (effect) {
@@ -306,6 +399,39 @@ class OneHourScenarioFlow {
                     is OneHourFlowEffect.UpdateTask -> effect.update.taskId
                     else -> null
                 }
+            }
+
+        fun authorizedTaskIdsForEvent(event: SystemRuntimeEvent): Set<String> =
+            when (event.id) {
+                "petsmart-open-slot",
+                "driver-1320-confirm",
+                "property-parking-notice",
+                "kylin-downstairs-reminder",
+                "driver-kylin-picked-up",
+                "driver-arrived-petsmart",
+                "petsmart-service-started",
+                "petsmart-service-progress",
+                -> setOf(PetGroomingTaskSurface.TASK_ID)
+
+                "ella-call-ended",
+                "ella-shopping-followup",
+                "market-delivery-window",
+                "ella-shopping-clarify",
+                "market-order-locked",
+                -> setOf(FamilyShoppingTaskSurface.TASK_ID)
+
+                "courier-coldchain-arriving",
+                "courier-coldchain-delivered",
+                "property-courier-help",
+                "property-coldchain-secured",
+                -> setOf(ColdchainDeliveryTaskSurface.TASK_ID)
+
+                "pharmacy-restock",
+                "health-supply-candidate",
+                "health-supply-held",
+                -> setOf(HealthSupplyTaskSurface.TASK_ID)
+
+                else -> emptySet()
             }
 
         val supportedEventIds: Set<String> = setOf(

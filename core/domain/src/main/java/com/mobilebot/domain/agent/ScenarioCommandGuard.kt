@@ -1,47 +1,46 @@
 package com.mobilebot.domain.agent
 
 import com.mobilebot.scenarios.runtime.ScenarioAgentCommand
+import com.mobilebot.scenarios.runtime.ScenarioCommandAuthorization
+import com.mobilebot.scenarios.runtime.ScenarioReminderAuthorization
+import com.mobilebot.scenarios.runtime.ScenarioSmsAuthorization
 
 object ScenarioCommandGuard {
     fun validate(
         commands: List<ScenarioAgentCommand>,
         knownTaskIds: Set<String>,
-        referenceCommands: List<ScenarioAgentCommand>,
+        authorization: ScenarioCommandAuthorization,
     ): String? {
         val known = knownTaskIds.toMutableSet()
         commands.forEachIndexed { index, command ->
-            if (command.taskId.isBlank()) return "第 ${index + 1} 条命令缺少 taskId。"
+            if (command.taskId.isBlank()) return "Command ${index + 1} is missing taskId."
+            if (command.taskId !in authorization.taskIds) {
+                return "Command ${index + 1} is not authorized for taskId: ${command.taskId}."
+            }
             when (command) {
                 is ScenarioAgentCommand.CreateTask -> known += command.taskId
                 else -> if (command.taskId !in known) {
-                    return "第 ${index + 1} 条命令引用未知任务：${command.taskId}。"
+                    return "Command ${index + 1} references unknown taskId: ${command.taskId}."
                 }
             }
-            sideEffectError(command, referenceCommands)?.let { return it }
+            sideEffectError(command, authorization)?.let { return it }
         }
         return null
     }
 
     private fun sideEffectError(
         command: ScenarioAgentCommand,
-        referenceCommands: List<ScenarioAgentCommand>,
+        authorization: ScenarioCommandAuthorization,
     ): String? =
         when (command) {
             is ScenarioAgentCommand.SendSms -> {
-                val allowed = referenceCommands.any {
-                    it is ScenarioAgentCommand.SendSms &&
-                        it.taskId == command.taskId &&
-                        it.to == command.to
-                }
-                if (allowed) null else "未授权短信命令：${command.taskId} -> ${command.to}。"
+                val allowed = ScenarioSmsAuthorization(command.taskId, command.to) in authorization.sms
+                if (allowed) null else "Unauthorized SMS command: ${command.taskId} -> ${command.to}."
             }
             is ScenarioAgentCommand.CreateReminder -> {
-                val allowed = referenceCommands.any {
-                    it is ScenarioAgentCommand.CreateReminder &&
-                        it.taskId == command.taskId &&
-                        it.scheduledFor == command.scheduledFor
-                }
-                if (allowed) null else "未授权提醒命令：${command.taskId} @ ${command.scheduledFor}。"
+                val allowed =
+                    ScenarioReminderAuthorization(command.taskId, command.scheduledFor) in authorization.reminders
+                if (allowed) null else "Unauthorized reminder command: ${command.taskId} @ ${command.scheduledFor}."
             }
             else -> null
         }

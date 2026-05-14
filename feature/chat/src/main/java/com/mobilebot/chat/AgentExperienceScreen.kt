@@ -530,7 +530,11 @@ private fun WorkbenchArea(
         if (frame.taskCards.isEmpty()) {
             item {
                 Text(
-                    text = if (frame.recentSystemEvents.isEmpty()) "等待系统事件。" else "正在处理系统事件。",
+                    text = when {
+                        frame.recentSystemEvents.isEmpty() -> "等待系统事件。"
+                        frame.busy -> "正在处理系统事件。"
+                        else -> "等待下一系统事件。"
+                    },
                     color = AgentMuted,
                     fontSize = 15.sp,
                     lineHeight = 20.sp,

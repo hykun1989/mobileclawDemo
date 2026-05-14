@@ -72,6 +72,92 @@ class ScenarioCommandCodecTest {
     }
 
     @Test
+    fun toolSchemaRequiresCreateTaskTitle() {
+        val schema = ScenarioCommandCodec.toolParametersSchema()
+
+        assertTrue(schema.contains("\"create_task\""))
+        assertTrue(schema.contains("\"title\""))
+    }
+
+    @Test
+    fun toolSchemaRequiresCompleteTaskSummary() {
+        val schema = ScenarioCommandCodec.toolParametersSchema()
+
+        assertTrue(schema.contains("\"complete_task\""))
+        assertTrue(schema.contains("\"summary\""))
+    }
+
+    @Test
+    fun createTaskSummaryHydratesVisibleSurface() {
+        val result = ScenarioCommandCodec.parse(
+            """
+            {
+              "commands": [
+                {
+                  "type": "create_task",
+                  "taskId": "task-1",
+                  "title": "Shopping",
+                  "summary": "Call transcript produced a shopping task."
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(result.isOk)
+        val create = result.batch?.commands.orEmpty().single() as ScenarioAgentCommand.CreateTask
+        assertEquals("Call transcript produced a shopping task.", create.seed.conversations.single().text)
+        assertEquals("Call transcript produced a shopping task.", create.seed.logs.single().text)
+    }
+
+    @Test
+    fun createTaskSubtitleHydratesVisibleSurfaceWhenSummaryIsMissing() {
+        val result = ScenarioCommandCodec.parse(
+            """
+            {
+              "commands": [
+                {
+                  "type": "create_task",
+                  "taskId": "task-1",
+                  "title": "Shopping",
+                  "subtitle": "Call transcript produced a shopping task."
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(result.isOk)
+        val create = result.batch?.commands.orEmpty().single() as ScenarioAgentCommand.CreateTask
+        assertEquals("Call transcript produced a shopping task.", create.seed.conversations.single().text)
+        assertEquals("Call transcript produced a shopping task.", create.seed.logs.single().text)
+    }
+
+    @Test
+    fun updateTaskSummaryHydratesVisibleSurface() {
+        val result = ScenarioCommandCodec.parse(
+            """
+            {
+              "commands": [
+                {
+                  "type": "update_task",
+                  "taskId": "task-1",
+                  "status": "DONE",
+                  "summary": "Task no longer needs action."
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(result.isOk)
+        val update = result.batch?.commands.orEmpty().single() as ScenarioAgentCommand.UpdateTask
+        assertEquals("Task no longer needs action.", update.update.conversations.single().text)
+        assertEquals("Task no longer needs action.", update.update.logs.single().text)
+        assertEquals("Task no longer needs action.", update.update.finalSummary)
+    }
+
+    @Test
     fun parsesEmptyCommandBatchForNoopTurns() {
         val result = ScenarioCommandCodec.parse("""{"commands":[]}""")
 

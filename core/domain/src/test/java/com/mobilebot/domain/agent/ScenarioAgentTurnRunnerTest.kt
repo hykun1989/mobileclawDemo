@@ -175,7 +175,7 @@ class ScenarioAgentTurnRunnerTest {
     }
 
     @Test
-    fun includesNormalizedIntentFactInUserDecisionPrompt() = runBlocking {
+    fun includesRawUserDecisionPromptAndVisibleActionsWithoutNormalizedIntent() = runBlocking {
         val llm = StubLlmClient(
             LlmResponse(
                 content = "",
@@ -194,15 +194,14 @@ class ScenarioAgentTurnRunnerTest {
             baseInput(
                 turnType = "user_decision",
                 userInput = "行，就这么办",
-                normalizedIntent = ACCEPT,
                 presentedActions = listOf(AgentDecisionAction("可以", ACCEPT.command)),
             ),
         )
 
         val prompt = llm.requests.single().last { it.role == "user" }.content.orEmpty()
         assertTrue(prompt.contains("normalizedIntent:"))
-        assertTrue(prompt.contains("id: pet.accept"))
-        assertTrue(prompt.contains("command: USER_INTENT:pet.accept"))
+        assertTrue(prompt.contains("(none)"))
+        assertTrue(prompt.contains("userInput:\n行，就这么办"))
         assertTrue(prompt.contains("- 可以: USER_INTENT:pet.accept"))
     }
 

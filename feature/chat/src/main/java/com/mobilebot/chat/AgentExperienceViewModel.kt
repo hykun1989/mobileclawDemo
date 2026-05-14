@@ -1044,7 +1044,7 @@ class AgentExperienceViewModel
                         caller = notification.title.removeSuffix(" 来电"),
                         startedTimeText = notification.timeText,
                         statusText = "正在通话",
-                        transcriptText = "通话转写中",
+                        transcriptText = notification.callTranscriptText ?: "通话转写中",
                     )
                 } else {
                     frame.activeCall
@@ -2118,6 +2118,7 @@ class AgentExperienceViewModel
                         timeText = timeText,
                         body = effect.body,
                         actionLabel = effect.actionLabel,
+                        callTranscriptText = effect.callTranscriptText,
                     ),
                 )
             }

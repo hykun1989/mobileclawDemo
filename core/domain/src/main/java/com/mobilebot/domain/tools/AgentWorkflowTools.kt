@@ -112,7 +112,9 @@ class ResolvePlaceTool
 
 class TranscribeCallTool
     @Inject
-    constructor() : Tool {
+    constructor(
+        private val callTranscriptRepository: CallTranscriptRepository,
+    ) : Tool {
         override val name: String = "transcribe_call"
 
         override val definition: ToolDefinition = ToolDefinition(
@@ -137,7 +139,10 @@ class TranscribeCallTool
             return try {
                 val args = JSONObject(argumentsJson)
                 val contact = args.optString("contact").ifBlank { "caller" }
-                val transcript = AgentContextResolver.transcribeCall(
+                val transcript = callTranscriptRepository.findTranscript(
+                    audioRef = args.optString("audioRef"),
+                    contact = contact,
+                ) ?: AgentContextResolver.transcribeCall(
                     audioRef = args.optString("audioRef"),
                     contact = contact,
                     taskFocus = args.optString("taskFocus"),
@@ -145,7 +150,7 @@ class TranscribeCallTool
                 ToolResult(
                     ok = true,
                     message = "Call transcript returned: $contact",
-                    dataJson = JSONObject(transcript).toString(),
+                    dataJson = JSONObject(transcript.toPayload()).toString(),
                 )
             } catch (e: Exception) {
                 ToolResult(false, e.message ?: "transcribe_call failed")
@@ -323,16 +328,14 @@ private object AgentContextResolver {
         audioRef: String,
         contact: String,
         taskFocus: String,
-    ): Map<String, Any?> {
+    ): CallTranscript {
         val title = taskFocus.ifBlank { "通话待办" }
-        return mapOf(
-            "audioRef" to audioRef,
-            "contact" to contact,
-            "durationSeconds" to 60,
-            "transcript" to "通话中提到一个需要后续跟进的事项。",
-            "tasks" to listOf(
-                mapOf("title" to title, "priority" to "normal"),
-            ),
+        return CallTranscript(
+            audioRef = audioRef,
+            contact = contact,
+            durationSeconds = 60,
+            transcript = "通话中提到一个需要后续跟进的事项。",
+            tasks = listOf(CallTranscriptTask(title = title, priority = "normal")),
         )
     }
 
@@ -346,6 +349,21 @@ private fun normalizeAmount(raw: String): String {
     val number = Regex("""\d+(?:\.\d+)?""").find(trimmed)?.value ?: return trimmed
     return "${number}元"
 }
+
+private fun CallTranscript.toPayload(): Map<String, Any?> =
+    mapOf(
+        "audioRef" to audioRef,
+        "contact" to contact,
+        "durationSeconds" to durationSeconds,
+        "transcript" to transcript,
+        "tasks" to tasks.map {
+            mapOf(
+                "title" to it.title,
+                "priority" to it.priority,
+                "items" to it.items,
+            )
+        },
+    )
 
 private fun jsonObjectToMap(obj: JSONObject): Map<String, Any?> {
     val out = linkedMapOf<String, Any?>()

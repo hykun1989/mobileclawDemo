@@ -2,6 +2,7 @@ package com.mobilebot.scenarios.onehour
 
 import com.mobilebot.scenarios.runtime.ScenarioSurfaceStatus
 import com.mobilebot.scenarios.runtime.ScenarioAgentCommand
+import com.mobilebot.scenarios.familyshopping.FamilyShoppingTaskSurface
 import com.mobilebot.systemruntime.CallEndedEvent
 import com.mobilebot.systemruntime.IncomingCallEvent
 import com.mobilebot.systemruntime.IncomingSmsEvent
@@ -213,11 +214,33 @@ class OneHourScenarioFlowTest {
         )
 
         assertEquals("接听", callLayer.actionLabel)
+        assertTrue(callLayer.callTranscriptText.orEmpty().contains("低脂牛奶"))
+        assertTrue(callLayer.callTranscriptText.orEmpty().contains("常用洗衣液"))
         assertTrue(endedEffects.any { it is OneHourFlowEffect.ClearActiveCall })
         assertTrue(endedEffects.any { it is OneHourFlowEffect.ClearSystemLayer })
+        val familyTask = endedEffects.single { it is OneHourFlowEffect.CreateTask } as OneHourFlowEffect.CreateTask
         assertEquals(
             "family-shopping-live",
-            (endedEffects.single { it is OneHourFlowEffect.CreateTask } as OneHourFlowEffect.CreateTask).seed.taskId,
+            familyTask.seed.taskId,
+        )
+        assertTrue(familyTask.seed.conversations.any { it.text.contains("低脂牛奶") && it.text.contains("水果") })
+        assertTrue(familyTask.seed.logs.any { it.text.contains("家庭采购") && it.text.contains("水果可选") })
+    }
+
+    @Test
+    fun ellaCallTranscriptMatchesScenarioContextAsset() {
+        val transcript = FamilyShoppingTaskSurface.transcriptForAudioRef("ella-call-ended")
+            ?: error("Missing Ella call transcript")
+        val assetTranscript = agentContext()
+            .getJSONArray("callTranscripts")
+            .getJSONObject(0)
+
+        assertEquals(assetTranscript.getString("audioRef"), transcript.audioRef)
+        assertEquals(assetTranscript.getString("transcript"), transcript.transcript)
+        assertEquals(
+            (0 until assetTranscript.getJSONArray("tasks").getJSONObject(0).getJSONArray("items").length())
+                .map { assetTranscript.getJSONArray("tasks").getJSONObject(0).getJSONArray("items").getString(it) },
+            transcript.items,
         )
     }
 
@@ -283,6 +306,15 @@ class OneHourScenarioFlowTest {
         val content = file.readText().trimStart('\uFEFF').trim()
         val events = JSONObject(content).getJSONArray("scenarioEvents")
         return (0 until events.length()).map { events.getJSONObject(it) }
+    }
+
+    private fun agentContext(): JSONObject {
+        val file = listOf(
+            File("core/data/src/main/assets/skills/md/one-hour-aio/AGENT_CONTEXT.json"),
+            File("../core/data/src/main/assets/skills/md/one-hour-aio/AGENT_CONTEXT.json"),
+            File("../../core/data/src/main/assets/skills/md/one-hour-aio/AGENT_CONTEXT.json"),
+        ).firstOrNull { it.isFile } ?: error("one-hour agent context not found")
+        return JSONObject(file.readText().trimStart('\uFEFF').trim())
     }
 
     private fun JSONObject.toRuntimeEvent(): SystemRuntimeEvent {

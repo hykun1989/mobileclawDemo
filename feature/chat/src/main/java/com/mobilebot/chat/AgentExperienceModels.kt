@@ -106,6 +106,7 @@ data class AgentSystemNotification(
     val timeText: String,
     val body: String,
     val actionLabel: String = "OK",
+    val callTranscriptText: String? = null,
 )
 
 data class AgentActiveCall(

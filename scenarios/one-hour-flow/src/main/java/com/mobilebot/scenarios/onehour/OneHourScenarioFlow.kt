@@ -33,6 +33,7 @@ sealed interface OneHourFlowEffect {
         val title: String,
         val body: String,
         val actionLabel: String,
+        val callTranscriptText: String? = null,
     ) : OneHourFlowEffect
 
     data class ClearSystemLayer(
@@ -165,6 +166,7 @@ class OneHourScenarioFlow {
                 title = "${event.source} 来电",
                 body = "正在接入通话转写。",
                 actionLabel = "接听",
+                callTranscriptText = FamilyShoppingTaskSurface.transcriptForIncomingCall(event.id)?.transcript,
             ),
         )
 
@@ -172,7 +174,7 @@ class OneHourScenarioFlow {
         listOf(
             OneHourFlowEffect.ClearActiveCall,
             OneHourFlowEffect.ClearSystemLayer(setOf(event.id, event.id.removeSuffix("-ended"))),
-            OneHourFlowEffect.CreateTask(FamilyShoppingTaskSurface.fromEllaCall()),
+            OneHourFlowEffect.CreateTask(FamilyShoppingTaskSurface.fromEllaCall(event.audioRef)),
         )
 
     private fun handleReminder(event: ReminderFiredEvent): List<OneHourFlowEffect> =

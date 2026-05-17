@@ -21,9 +21,6 @@ import com.mobilebot.domain.tools.SetAlarmTool
 import com.mobilebot.domain.tools.SetTimerTool
 import com.mobilebot.domain.tools.ShareTextTool
 import com.mobilebot.domain.tools.PublishFactTool
-import com.mobilebot.domain.tools.SaveMemoryTool
-import com.mobilebot.domain.tools.RecallMemoriesTool
-import com.mobilebot.domain.tools.DeleteMemoryTool
 import com.mobilebot.domain.tools.SpawnSubtaskTool
 import com.mobilebot.domain.tools.CreateCalendarEventTool
 import com.mobilebot.domain.tools.CreateNotificationTool

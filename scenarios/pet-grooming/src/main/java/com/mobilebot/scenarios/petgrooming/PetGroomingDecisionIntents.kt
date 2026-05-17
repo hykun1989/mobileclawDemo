@@ -35,6 +35,13 @@ object PetGroomingDecisionIntents {
         meaning = "Y chooses the 9:00 PetSmart slot and authorizes routine downstream coordination.",
     )
 
+    val SubjectUnavailable = AgentDecisionIntent(
+        id = "pet_grooming.subject_unavailable",
+        displayLabel = "Subject unavailable",
+        meaning = "The grooming subject is no longer available or the task premise is invalid, so the current grooming coordination should stop instead of being treated as a schedule change.",
+        includeRawText = true,
+    )
+
     val AskAfternoon = AgentDecisionIntent(
         id = "pet_grooming.ask_afternoon",
         displayLabel = "问下午",
@@ -70,6 +77,7 @@ object PetGroomingDecisionIntents {
                 DeferCurrentWeek,
                 AcceptOpenSlot,
                 KeepOriginalSlot,
+                SubjectUnavailable,
                 BookNine,
                 AskAfternoon,
                 BookAfternoonBathOnly,

@@ -1,5 +1,6 @@
 ﻿package com.mobilebot.chat
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,12 +14,19 @@ import com.mobilebot.domain.agent.AgentSessionRoute
 import com.mobilebot.domain.agent.AgentDecisionInput
 import com.mobilebot.domain.agent.AgentDecisionIntent
 import com.mobilebot.domain.agent.AgentDecisionIntentNormalizer
+import com.mobilebot.domain.agent.ScenarioCommandGuard
+import com.mobilebot.domain.agent.ScenarioAgentTurnInput
+import com.mobilebot.domain.agent.ScenarioAgentTurnRunner
 import com.mobilebot.domain.interaction.ActionPromptCodec
+import com.mobilebot.domain.repository.MemoryFileRepository
 import com.mobilebot.domain.todo.TodoListCodec
+import com.mobilebot.domain.tools.ToolRegistry
 import com.mobilebot.scenarios.onehour.OneHourFlowEffect
 import com.mobilebot.scenarios.onehour.OneHourScenarioPolicy
 import com.mobilebot.scenarios.onehour.OneHourScenarioFlow
 import com.mobilebot.scenarios.onehour.OneHourScenarioRunTracker
+import com.mobilebot.scenarios.runtime.ScenarioAgentCommand
+import com.mobilebot.scenarios.runtime.ScenarioAction
 import com.mobilebot.scenarios.runtime.ScenarioConversation
 import com.mobilebot.scenarios.runtime.ScenarioDecision
 import com.mobilebot.scenarios.runtime.ScenarioLog
@@ -39,6 +47,7 @@ import com.mobilebot.systemruntime.SystemRuntimeEvent
 import com.mobilebot.systemruntime.SystemRuntimeScriptEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +55,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.time.Duration
 import java.time.LocalDateTime
@@ -65,6 +75,9 @@ class AgentExperienceViewModel
         private val foreground: ForegroundController,
         private val decisionIntentNormalizer: AgentDecisionIntentNormalizer,
         private val systemRuntime: SystemRuntime,
+        private val scenarioAgentTurnRunner: ScenarioAgentTurnRunner,
+        private val toolRegistry: ToolRegistry,
+        private val memoryFiles: MemoryFileRepository,
     ) : ViewModel() {
         private var currentChatId: String? = null
         private var eventCounter = 0
@@ -76,7 +89,8 @@ class AgentExperienceViewModel
         private var awaitingInitialPrecheckDecision = false
         private var activeServiceDate = INITIAL_SCENARIO_CLOCK.toLocalDate().plusDays(1)
         private var clockMode = ScenarioClockMode.Live
-        private var normalClockElapsedMs = 0L
+        private var liveClockAnchorMs = SystemClock.elapsedRealtime()
+        private var fastClockJob: Job? = null
         private var taskSortCounter = 0L
         private val deliveredTimelineEvents = mutableSetOf<String>()
         private val taskStates = linkedMapOf<String, AgentTaskState>()
@@ -125,10 +139,39 @@ class AgentExperienceViewModel
         }
 
         fun accelerateClockUntilNextEvent() {
+            accelerateClockUntilNextEvent(allowWhilePaused = false)
+        }
+
+        private fun accelerateClockUntilNextEvent(allowWhilePaused: Boolean) {
             if (deferredRetriggerInProgress) return
+            if (!allowWhilePaused && shouldPauseLiveClock()) return
+            if (fastClockJob?.isActive == true) return
+            val target = nextDeliverableTimelineEvent()?.triggerAt ?: return
             clockMode = ScenarioClockMode.FastUntilNextEvent
-            normalClockElapsedMs = 0L
             _frame.update { it.copy(clockMode = clockMode) }
+            fastClockJob = viewModelScope.launch {
+                while (scenarioClock.isBefore(target) && clockMode == ScenarioClockMode.FastUntilNextEvent) {
+                    delay(CLOCK_LOOP_INTERVAL_MS)
+                    val nextClock = scenarioClock.plusMinutes(1)
+                    scenarioClock = if (nextClock.isAfter(target)) target else nextClock
+                    _frame.update { it.withClock(scenarioClock) }
+                    // 快进每过一分钟就检查一次，触发下一个系统事件后立即停下。
+                    handleDueTimelineEvents()
+                    if (clockMode != ScenarioClockMode.FastUntilNextEvent) {
+                        return@launch
+                    }
+                }
+                handleDueTimelineEvents()
+                if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
+                    setClockModeLive()
+                }
+            }
+        }
+
+        fun markScreenReady() {
+            if (clockMode == ScenarioClockMode.Live) {
+                resetLiveClockAnchor()
+            }
         }
 
         fun startScenario() {
@@ -140,9 +183,10 @@ class AgentExperienceViewModel
             eventCounter = 0
             continuationCount = 0
             latestAgentDecisionIntent = null
-            pendingSelectedActionLabel = null
-            awaitingInitialPrecheckDecision = true
-            taskSessionIds.clear()
+                pendingSelectedActionLabel = null
+                awaitingInitialPrecheckDecision = true
+                resetLiveClockAnchor()
+                taskSessionIds.clear()
             scenarioRunTracker.clear()
             val baseFrame = AgentExperienceFrame.initial(scenario).withClock(scenarioClock)
             val precheckDecision = OneHourScenarioPolicy.precheckDecision()
@@ -577,6 +621,7 @@ class AgentExperienceViewModel
                 val nextClock = scenarioClock.plusDays(7).withHour(13).withMinute(0).withSecond(0).withNano(0)
                 advanceClockTo(nextClock)
                 scenarioClock = nextClock
+                resetLiveClockAnchor()
                 latestAgentDecisionIntent = null
                 pendingSelectedActionLabel = null
                 scenarioRunTracker.clear()
@@ -999,7 +1044,7 @@ class AgentExperienceViewModel
                         caller = notification.title.removeSuffix(" 来电"),
                         startedTimeText = notification.timeText,
                         statusText = "正在通话",
-                        transcriptText = "通话转写中",
+                        transcriptText = notification.callTranscriptText ?: "通话转写中",
                     )
                 } else {
                     frame.activeCall
@@ -1013,7 +1058,7 @@ class AgentExperienceViewModel
                 viewModelScope.launch {
                     delay(CALL_CONNECTED_DISPLAY_MS)
                     if (_frame.value.activeCall != null) {
-                        accelerateClockUntilNextEvent()
+                        accelerateClockUntilNextEvent(allowWhilePaused = true)
                     }
                 }
             }
@@ -1351,12 +1396,18 @@ class AgentExperienceViewModel
                 else -> "service"
             }
             return AgentParticipant(
-                id = "$role-${trimmed.lowercase().replace(Regex("""\s+"""), "-")}",
+                id = participantId(trimmed, role),
                 label = participantLabel(trimmed),
                 displayName = trimmed,
                 role = role,
             )
         }
+
+        private fun participantId(name: String, role: String): String =
+            when (role) {
+                "private_driver" -> "driver"
+                else -> "$role-${name.lowercase().replace(Regex("""\s+"""), "-")}"
+            }
 
         private fun participantLabel(name: String): String {
             val label = OneHourScenarioPolicy.labelForContact(name)
@@ -1437,11 +1488,14 @@ class AgentExperienceViewModel
             activate: Boolean = false,
         ) {
             updateTaskState(update.taskId, activate = activate) { task ->
-                val baseParticipants = update.participants?.map { it.toAgentParticipant() } ?: task.participants
+                val baseParticipants = update.participants
+                    ?.map { it.toAgentParticipant() }
+                    ?.canonicalParticipants()
+                    ?: task.participants
                 val withAdded = update.participantsToAdd.fold(baseParticipants) { participants, participant ->
                     participants.withParticipant(participant.toAgentParticipant())
                 }
-                val participants = if (update.participantsToRemove.isEmpty()) {
+                val updatedParticipants = if (update.participantsToRemove.isEmpty()) {
                     withAdded
                 } else {
                     withAdded.filterNot { it.id in update.participantsToRemove }
@@ -1450,12 +1504,16 @@ class AgentExperienceViewModel
                     status = update.status.toAgentStatus(),
                     updatedTimeText = timeText,
                     subtitle = update.subtitle,
-                    conversationItems = task.conversationItems + update.conversations.map { it.toConversationItem() },
+                    conversationItems = appendConversationItems(
+                        task.conversationItems,
+                        update.conversations.map { it.toConversationItem() },
+                    ),
                     taskLogs = appendTaskLogs(task.taskLogs, update.logs.toTaskLogs(timeText)),
-                    participants = participants,
+                    participants = updatedParticipants,
                     progressLine = update.progress.toProgressLine(),
                     decisionPrompt = update.decision?.toDecisionPrompt(),
                     activeActionValue = update.activeActionValue,
+                    selectedAction = if (update.decision == null) task.selectedAction else null,
                     timeline = task.timeline + update.timeline.map { it.toTimelineEvent() },
                     finalSummary = update.finalSummary ?: task.finalSummary,
                 )
@@ -1511,8 +1569,29 @@ class AgentExperienceViewModel
                 role = role,
             )
 
+        private fun List<AgentParticipant>.canonicalParticipants(): List<AgentParticipant> =
+            fold(emptyList<AgentParticipant>()) { parties, participant ->
+                parties.withCanonicalParticipant(participant)
+            }.takeLast(MAX_PARTICIPANTS)
+
+        private fun List<AgentParticipant>.withCanonicalParticipant(participant: AgentParticipant): List<AgentParticipant> =
+            filterNot { it.isEquivalentParticipant(participant) } + participant
+
+        private fun AgentParticipant.isEquivalentParticipant(other: AgentParticipant): Boolean =
+            id == other.id ||
+                displayName.equals(other.displayName, ignoreCase = true) ||
+                (role == other.role && label == other.label)
+
         private fun ScenarioProgress.toProgressLine(): AgentProgressLine =
             AgentProgressLine(
+                label = label,
+                detail = detail,
+                completed = completed,
+                total = total,
+            )
+
+        private fun AgentProgressLine.toScenarioProgress(): ScenarioProgress =
+            ScenarioProgress(
                 label = label,
                 detail = detail,
                 completed = completed,
@@ -1547,15 +1626,17 @@ class AgentExperienceViewModel
         private fun tickScenarioClock() {
             if (deferredRetriggerInProgress) return
             if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
-                scenarioClock = scenarioClock.plusMinutes(1)
-                _frame.update { it.withClock(scenarioClock) }
-                handleDueTimelineEvents()
+                // 快进由单独 Job 执行，避免普通时钟循环并发推进。
                 return
             }
-            normalClockElapsedMs += CLOCK_LOOP_INTERVAL_MS
-            if (normalClockElapsedMs >= SCENARIO_CLOCK_TICK_MS) {
-                normalClockElapsedMs = 0L
-                scenarioClock = scenarioClock.plusMinutes(1)
+            if (shouldPauseLiveClock()) {
+                resetLiveClockAnchor()
+                return
+            }
+            val elapsedMinutes = (SystemClock.elapsedRealtime() - liveClockAnchorMs) / SCENARIO_CLOCK_TICK_MS
+            if (elapsedMinutes > 0L) {
+                liveClockAnchorMs += elapsedMinutes * SCENARIO_CLOCK_TICK_MS
+                scenarioClock = scenarioClock.plusMinutes(elapsedMinutes)
                 _frame.update { it.withClock(scenarioClock) }
                 handleDueTimelineEvents()
             }
@@ -1565,19 +1646,45 @@ class AgentExperienceViewModel
             val due = timelineScript
                 .filter { it.id !in deliveredTimelineEvents && !it.triggerAt.isAfter(scenarioClock) }
                 .sortedBy { it.triggerAt }
-            if (due.isEmpty()) return
-            for (event in due) {
+            val deliverable = due.filterNot { shouldHoldTimelineEvent(it) }
+            if (deliverable.isEmpty()) return
+            for (event in deliverable) {
                 deliveredTimelineEvents += event.id
                 viewModelScope.launch {
                     systemRuntime.publishEvent(event.toSystemRuntimeEvent())
                 }
             }
             if (clockMode == ScenarioClockMode.FastUntilNextEvent) {
-                clockMode = ScenarioClockMode.Live
-                normalClockElapsedMs = 0L
-                _frame.update { it.copy(clockMode = clockMode) }
+                setClockModeLive()
             }
         }
+
+        private fun nextDeliverableTimelineEvent(): ScenarioTimelineEvent? =
+            timelineScript
+                .asSequence()
+                .filter { it.id !in deliveredTimelineEvents }
+                .filterNot { shouldHoldTimelineEvent(it) }
+                .filter { it.triggerAt.isAfter(scenarioClock) || it.triggerAt == scenarioClock }
+                .minByOrNull { it.triggerAt }
+
+        private fun setClockModeLive() {
+            clockMode = ScenarioClockMode.Live
+            resetLiveClockAnchor()
+            _frame.update { it.copy(clockMode = clockMode) }
+        }
+
+        private fun resetLiveClockAnchor() {
+            liveClockAnchorMs = SystemClock.elapsedRealtime()
+        }
+
+        private fun shouldPauseLiveClock(): Boolean =
+            _frame.value.busy ||
+                _frame.value.decisionPrompt != null ||
+                _frame.value.systemNotification != null ||
+                _frame.value.activeCall != null
+
+        private fun shouldHoldTimelineEvent(event: ScenarioTimelineEvent): Boolean =
+            event.id in OneHourScenarioFlow.petAcceptanceRequiredEventIds && !oneHourFlow.isPetCareAccepted()
 
         private fun handleSystemRuntimeEvent(event: SystemRuntimeEvent) {
             _frame.update {
@@ -1586,7 +1693,408 @@ class AgentExperienceViewModel
                     debugTrace = appendTrace(it.debugTrace, "system event -> ${event.id}"),
                 )
             }
-            applyOneHourFlowEffects(oneHourFlow.handle(event), blueprintTimeText(event.occurredAt))
+            applyOneHourFlowEffects(oneHourFlow.systemLayerEffects(event), blueprintTimeText(event.occurredAt))
+            viewModelScope.launch {
+                runScenarioAgentForSystemEvent(event)
+            }
+        }
+
+        private suspend fun runScenarioAgentForSystemEvent(event: SystemRuntimeEvent) {
+            val authorization = OneHourScenarioFlow.commandAuthorizationForEvent(event)
+            val taskId = authorization.taskIds.firstOrNull { taskStates.containsKey(it) }
+                ?: authorization.taskIds.firstOrNull()
+                ?: _frame.value.activeTaskId
+            val sessionId = sessionIdForTask(taskId ?: event.id)
+            val timeText = blueprintTimeText(event.occurredAt)
+            recordObservedSystemEventLog(event, timeText, authorization.taskIds)
+            if (authorization.taskIds.isNotEmpty()) {
+                _frame.update {
+                    it.copy(
+                        busy = true,
+                        statusLabel = "Thinking",
+                        progressLine = it.progressLine.copy(
+                            label = "Thinking",
+                            detail = event.title,
+                        ),
+                    )
+                }
+            }
+            val hasApiKey = settings.getApiKey().isNotBlank()
+            val result = if (!hasApiKey) {
+                null
+            } else {
+                runScenarioPlanner(
+                    ScenarioAgentTurnInput(
+                        sessionId = sessionId,
+                        scenarioId = scenario.scenarioId,
+                        skillName = scenario.skillName,
+                        turnType = "system_event",
+                        taskId = taskId,
+                        eventFact = event.toAgentFact(),
+                        currentTaskSnapshot = taskSnapshotFor(taskId),
+                        allTaskSnapshots = allTaskSnapshotsForPlanner(),
+                        recentToolResults = recentToolResultsForPlanner(),
+                        memoryDigest = memoryDigestForScenario(),
+                        skillInstruction = OneHourScenarioPolicy.orchestrationInstruction(
+                            plannerPolicyJson = OneHourScenarioFlow.plannerPolicyJson(event),
+                        ),
+                    ),
+                )
+            }
+            if (result?.isOk == true) {
+                if (result.commands.isEmpty() && authorization.taskIds.isNotEmpty()) {
+                    recordScenarioAgentDiagnostic("system ${event.id}", "LLM 未返回命令，未执行本地业务结果。")
+                    return
+                }
+                val guardError = ScenarioCommandGuard.validate(
+                    commands = result.commands,
+                    knownTaskIds = taskStates.keys,
+                    authorization = authorization,
+                )
+                if (guardError == null) {
+                    applyScenarioAgentCommands(result.commands.withSystemEventLog(event), timeText)
+                    _frame.update { it.copy(busy = false, activeActionValue = null) }
+                } else {
+                    recordScenarioAgentDiagnostic("system ${event.id}", guardError)
+                }
+            } else {
+                val reason = result?.error ?: if (hasApiKey) {
+                    "LLM 编排超时，未执行本地业务结果。"
+                } else {
+                    "未配置 API Key，未执行本地业务结果。"
+                }
+                recordScenarioAgentDiagnostic("system ${event.id}", reason)
+            }
+        }
+
+        private suspend fun runScenarioPlanner(input: ScenarioAgentTurnInput) =
+            withContext(Dispatchers.IO) {
+                withTimeoutOrNull(SCENARIO_PLANNER_TIMEOUT_MS) {
+                    scenarioAgentTurnRunner.run(input)
+            }
+        }
+
+        private fun recordObservedSystemEventLog(
+            event: SystemRuntimeEvent,
+            timeText: String,
+            taskIds: Set<String>,
+        ) {
+            val eventLog = ScenarioLog(event.toBlueprintLogText())
+            taskIds
+                .filter { taskStates.containsKey(it) }
+                .forEach { taskId ->
+                    updateTaskState(taskId, activate = _frame.value.activeTaskId == taskId) { task ->
+                        task.copy(
+                            taskLogs = appendTaskLogs(task.taskLogs, listOf(eventLog).toTaskLogs(timeText)),
+                        )
+                    }
+                }
+        }
+
+        private fun SystemRuntimeEvent.toAgentFact(): String =
+            buildString {
+                appendLine("type: ${this@toAgentFact::class.simpleName}")
+                appendLine("time: ${blueprintTimeText(occurredAt)}")
+                appendLine("source: $source")
+                appendLine("title: $title")
+                appendLine("body: $body")
+            }
+
+        private fun List<ScenarioAgentCommand>.withSystemEventLog(event: SystemRuntimeEvent): List<ScenarioAgentCommand> {
+            val eventLog = ScenarioLog(event.toBlueprintLogText())
+            val loggedTaskIds = mutableSetOf<String>()
+            return map { command ->
+                when (command) {
+                    is ScenarioAgentCommand.CreateTask -> {
+                        if (!loggedTaskIds.add(command.seed.taskId)) {
+                            command
+                        } else {
+                            command.copy(seed = command.seed.copy(logs = command.seed.logs.withEventLog(eventLog, event)))
+                        }
+                    }
+                    is ScenarioAgentCommand.UpdateTask -> {
+                        if (!loggedTaskIds.add(command.update.taskId)) {
+                            command
+                        } else {
+                            command.copy(update = command.update.copy(logs = command.update.logs.withEventLog(eventLog, event)))
+                        }
+                    }
+                    else -> command
+                }
+            }
+        }
+
+        private fun List<ScenarioLog>.withEventLog(
+            eventLog: ScenarioLog,
+            event: SystemRuntimeEvent,
+        ): List<ScenarioLog> {
+            val alreadyLogged = any { log ->
+                log.text == eventLog.text || (event.body.isNotBlank() && log.text.contains(event.body))
+            }
+            if (alreadyLogged) return this
+            val remainingLogs = if (firstOrNull()?.isUnattributedEventSummary() == true) drop(1) else this
+            return listOf(eventLog) + remainingLogs
+        }
+
+        private fun ScenarioLog.isUnattributedEventSummary(): Boolean {
+            val value = text.trim()
+            if (value.isBlank()) return false
+            val operationPrefixes = listOf(
+                "收到",
+                "发送",
+                "开始",
+                "创建",
+                "触发",
+                "记录",
+                "支付",
+                "添加",
+                "移除",
+                "完成",
+                "更新",
+                "联系",
+                "监听",
+                "回复",
+                "取消",
+            )
+            return operationPrefixes.none { value.startsWith(it) }
+        }
+
+        private fun SystemRuntimeEvent.toBlueprintLogText(): String {
+            val detail = body.ifBlank { title }
+            val sourceText = source.ifBlank { "系统" }
+            return when (this) {
+                is IncomingSmsEvent -> "收到 $sourceText 短信：$detail"
+                is IncomingCallEvent -> "收到 $sourceText 来电：$detail"
+                is CallEndedEvent -> "$sourceText 通话结束：$detail"
+                is ReminderFiredEvent -> "触发提醒：$detail"
+                else -> "收到 $sourceText 通知：$detail"
+            }
+        }
+
+        private suspend fun memoryDigestForScenario(): String =
+            withContext(Dispatchers.IO) {
+                memoryFiles.readMemoryMd().trim().take(2200)
+            }
+
+        private fun taskSnapshotFor(taskId: String?): String {
+            val task = taskId?.let { taskStates[it] } ?: return ""
+            return buildString {
+                appendLine("id: ${task.id}")
+                appendLine("title: ${task.title}")
+                appendLine("subtitle: ${task.subtitle}")
+                appendLine("status: ${task.status}")
+                appendLine("participants: ${task.participants.toPlannerDigest()}")
+                appendLine("progress: ${task.progressLine.label} ${task.progressLine.detail}")
+                appendLine("latestLogs:")
+                task.taskLogs.takeLast(8).forEach { appendLine("- ${it.timeText} ${it.text}") }
+                appendLine("latestConversation:")
+                task.conversationItems.takeLast(6).forEach { appendLine("- ${it.role}: ${it.text}") }
+            }
+        }
+
+        private fun allTaskSnapshotsForPlanner(): String {
+            if (taskStates.isEmpty()) return ""
+            return taskStates.values.joinToString("\n\n") { task ->
+                buildString {
+                    appendLine("id: ${task.id}")
+                    appendLine("title: ${task.title}")
+                    appendLine("subtitle: ${task.subtitle}")
+                    appendLine("status: ${task.status}")
+                    appendLine("participants: ${task.participants.toPlannerDigest()}")
+                    appendLine("progress: ${task.progressLine.label} ${task.progressLine.detail}")
+                    task.taskLogs.lastOrNull()?.let { appendLine("latestLog: ${it.timeText} ${it.text}") }
+                }.trim()
+            }
+        }
+
+        private fun List<AgentParticipant>.toPlannerDigest(): String =
+            if (isEmpty()) {
+                "(none)"
+            } else {
+                joinToString(", ") { participant ->
+                    "${participant.id}/${participant.label}/${participant.displayName}/${participant.role}"
+                }
+            }
+
+        private fun recentToolResultsForPlanner(): String =
+            taskStates.values
+                .flatMap { task -> task.taskLogs.takeLast(4).map { "${task.id}: ${it.timeText} ${it.text}" } }
+                .takeLast(10)
+                .joinToString("\n")
+
+        private fun recordScenarioAgentDiagnostic(
+            turn: String,
+            reason: String,
+        ) {
+            _frame.update {
+                val activeTask = taskStates[it.activeTaskId]
+                val plannerLabel = it.statusLabel in setOf("Thinking", "理解中")
+                it.copy(
+                    busy = false,
+                    activeActionValue = null,
+                    statusLabel = activeTask?.status?.let(::statusLabelFor)
+                        ?: if (plannerLabel) "Running" else it.statusLabel,
+                    progressLine = activeTask?.progressLine
+                        ?: if (it.progressLine.label in setOf("Thinking", "理解中")) {
+                            it.progressLine.copy(label = "Running", detail = "")
+                        } else {
+                            it.progressLine
+                        },
+                    debugTrace = appendTrace(
+                        it.debugTrace,
+                        "planner diagnostic [$turn] -> ${reason.take(220)}",
+                    ),
+                )
+            }
+        }
+
+        private fun applyScenarioAgentCommands(
+            commands: List<ScenarioAgentCommand>,
+            timeText: String,
+        ) {
+            oneHourFlow.updateRuntimeStateFromPlannerCommands(commands)
+            val sideEffects = mutableListOf<suspend () -> Unit>()
+            commands.forEach { command ->
+                when (command) {
+                    is ScenarioAgentCommand.CreateTask -> upsertTask(command.seed.toTaskState(timeText))
+                    is ScenarioAgentCommand.UpdateTask -> applyScenarioTaskUpdate(command.update, timeText, activate = true)
+                    is ScenarioAgentCommand.AskUser -> applyScenarioTaskUpdate(
+                        ScenarioTaskUpdate(
+                            taskId = command.taskId,
+                            subtitle = taskStates[command.taskId]?.subtitle.orEmpty(),
+                            status = ScenarioSurfaceStatus.BLOCKED,
+                            conversations = emptyList(),
+                            progress = taskStates[command.taskId]?.progressLine?.toScenarioProgress()
+                                ?: ScenarioProgress("等待", "等待用户决策", 0, 1),
+                            decision = command.decision,
+                        ),
+                        timeText,
+                        activate = true,
+                    )
+                    is ScenarioAgentCommand.SendSms -> {
+                        sideEffects += { executeScenarioSmsCommand(command, timeText) }
+                    }
+                    is ScenarioAgentCommand.WaitSms -> {
+                        sideEffects += {
+                            appendCommandLog(
+                                command.taskId,
+                                timeText,
+                                "开始监听 ${command.contact} 的短信：${command.reason}",
+                            )
+                        }
+                    }
+                    is ScenarioAgentCommand.CreateReminder -> {
+                        sideEffects += { executeScenarioReminderCommand(command, timeText) }
+                    }
+                    is ScenarioAgentCommand.SwitchTask -> selectTask(command.taskId)
+                    is ScenarioAgentCommand.CompleteTask -> applyScenarioTaskUpdate(
+                        ScenarioTaskUpdate(
+                            taskId = command.taskId,
+                            subtitle = command.summary,
+                            status = ScenarioSurfaceStatus.DONE,
+                            conversations = listOf(ScenarioConversation(ScenarioSurfaceRole.AGENT, command.summary)),
+                            logs = listOf(ScenarioLog(command.summary)),
+                            progress = taskStates[command.taskId]?.progressLine?.let {
+                                ScenarioProgress("完成", command.summary, it.total, it.total)
+                            } ?: ScenarioProgress("完成", command.summary, 1, 1),
+                            finalSummary = command.summary,
+                        ),
+                        timeText,
+                        activate = true,
+                    )
+                }
+            }
+            if (sideEffects.isNotEmpty()) {
+                viewModelScope.launch {
+                    sideEffects.forEach { it() }
+                }
+            }
+        }
+
+        private suspend fun executeScenarioSmsCommand(
+            command: ScenarioAgentCommand.SendSms,
+            timeText: String,
+        ) {
+            val result = withContext(Dispatchers.IO) {
+                toolRegistry.execute(
+                    "system_send_sms",
+                    JSONObject()
+                        .put("scenarioId", ONE_HOUR_SCENARIO_ID)
+                        .put("to", command.to)
+                        .put("message", command.message)
+                        .toString(),
+                )
+            }
+            val body = if (result.dataJson.isNullOrBlank()) {
+                result.message
+            } else {
+                "${result.message}\n${result.dataJson}"
+            }
+            val logs = listOfNotNull(
+                taskLogFromToolResult(
+                    tool = "system_send_sms",
+                    content = body,
+                    ok = result.ok,
+                    eventIndex = taskStates[command.taskId]?.taskLogs?.size ?: 0,
+                ),
+            )
+            if (logs.isNotEmpty()) {
+                updateTaskState(command.taskId, activate = _frame.value.activeTaskId == command.taskId) { task ->
+                    task.copy(
+                        taskLogs = appendTaskLogs(task.taskLogs, logs),
+                    )
+                }
+            }
+        }
+
+        private suspend fun executeScenarioReminderCommand(
+            command: ScenarioAgentCommand.CreateReminder,
+            timeText: String,
+        ) {
+            val result = withContext(Dispatchers.IO) {
+                toolRegistry.execute(
+                    "device_system",
+                    JSONObject()
+                        .put("action", "long_reminder")
+                        .put(
+                            "params",
+                            JSONObject()
+                                .put("title", command.title)
+                                .put("body", command.body)
+                                .put("scheduledFor", command.scheduledFor),
+                        )
+                        .toString(),
+                )
+            }
+            val body = if (result.dataJson.isNullOrBlank()) {
+                result.message
+            } else {
+                "${result.message}\n${result.dataJson}"
+            }
+            val log = taskLogFromToolResult(
+                tool = "device_system",
+                content = body,
+                ok = result.ok,
+                eventIndex = taskStates[command.taskId]?.taskLogs?.size ?: 0,
+            ) ?: AgentTaskLog(
+                id = nextId("task"),
+                timeText = timeText,
+                text = "创建提醒：${command.scheduledFor} ${command.title}",
+            )
+            updateTaskState(command.taskId, activate = _frame.value.activeTaskId == command.taskId) { task ->
+                task.copy(taskLogs = appendTaskLogs(task.taskLogs, listOf(log)))
+            }
+        }
+
+        private fun appendCommandLog(
+            taskId: String,
+            timeText: String,
+            text: String,
+        ) {
+            val log = AgentTaskLog(nextId("task"), timeText, text)
+            updateTaskState(taskId, activate = _frame.value.activeTaskId == taskId) { task ->
+                task.copy(taskLogs = appendTaskLogs(task.taskLogs, listOf(log)))
+            }
         }
 
         private fun handleLocalScenarioDecision(
@@ -1595,8 +2103,26 @@ class AgentExperienceViewModel
             selectedActionValue: String?,
         ) {
             val prompt = _frame.value.decisionPrompt ?: return
-            if (selectedActionValue != null) {
-                pendingSelectedActionLabel = displayText
+            val presentedActions = prompt.actions.map { it.toAgentDecisionAction() }
+            val userConversation = if (selectedActionValue == null) {
+                AgentConversationItem(
+                    id = nextId("conversation"),
+                    role = AgentConversationRole.USER,
+                    text = displayText,
+                )
+            } else {
+                null
+            }
+            _frame.value.activeTaskId?.let { taskId ->
+                taskStates[taskId]?.let { task ->
+                    taskStates[taskId] = task.copy(
+                        conversationItems = appendConversationItems(
+                            task.conversationItems,
+                            listOfNotNull(userConversation),
+                        ),
+                        selectedAction = null,
+                    )
+                }
             }
             _frame.update {
                 it.copy(
@@ -1604,7 +2130,11 @@ class AgentExperienceViewModel
                     busy = true,
                     decisionPrompt = if (selectedActionValue == null) null else it.decisionPrompt,
                     activeActionValue = selectedActionValue,
-                    conversationItems = it.conversationItems,
+                    conversationItems = appendConversationItems(
+                        it.conversationItems,
+                        listOfNotNull(userConversation),
+                    ),
+                    selectedAction = null,
                     progressLine = it.progressLine.copy(
                         label = "理解中",
                         detail = displayText,
@@ -1613,62 +2143,102 @@ class AgentExperienceViewModel
                 )
             }
             viewModelScope.launch {
-                val normalized = decisionIntentNormalizer.normalize(
-                    AgentDecisionInput(
-                        contextId = scenario.scenarioId,
-                        promptText = prompt.text,
-                        presentedActions = prompt.actions.map { it.toAgentDecisionAction() },
-                        candidateIntents = OneHourScenarioPolicy.decisionIntents(scenario.scenarioId),
-                        displayText = displayText,
-                        rawText = rawText,
-                    ),
+                runScenarioAgentForDecision(
+                    displayText = displayText,
+                    rawText = rawText,
+                    selectedActionValue = selectedActionValue,
+                    presentedActions = presentedActions,
                 )
-                _frame.update {
-                    it.copy(
-                        debugTrace = appendTrace(
-                            it.debugTrace,
-                            "local intent -> ${normalized.intent.id}${if (normalized.usedFallback) " (fallback)" else ""}",
+            }
+        }
+
+        private suspend fun runScenarioAgentForDecision(
+            displayText: String,
+            rawText: String,
+            selectedActionValue: String?,
+            presentedActions: List<AgentDecisionAction>,
+        ) {
+            val taskId = _frame.value.activeTaskId
+            val authorization = OneHourScenarioFlow.commandAuthorizationForUserDecision(taskId)
+            val sessionId = sessionIdForTask(taskId)
+            val timeText = blueprintTimeText(scenarioClock)
+            val hasApiKey = settings.getApiKey().isNotBlank()
+            val result = if (!hasApiKey) {
+                null
+            } else {
+                runScenarioPlanner(
+                    ScenarioAgentTurnInput(
+                        sessionId = sessionId,
+                        scenarioId = scenario.scenarioId,
+                        skillName = scenario.skillName,
+                        turnType = "user_decision",
+                        taskId = taskId,
+                        userInput = displayText,
+                        presentedActions = presentedActions,
+                        currentTaskSnapshot = taskSnapshotFor(taskId),
+                        allTaskSnapshots = allTaskSnapshotsForPlanner(),
+                        recentToolResults = recentToolResultsForPlanner(),
+                        memoryDigest = memoryDigestForScenario(),
+                        skillInstruction = OneHourScenarioPolicy.userDecisionInstruction(
+                            userText = displayText,
+                            plannerPolicyJson = OneHourScenarioFlow.userDecisionPlannerPolicyJson(
+                                userText = displayText,
+                                taskId = taskId,
+                                displayedActions = presentedActions.map { it.label to it.value },
+                            ),
                         ),
-                    )
-                }
-                // LLM 只负责识别用户意图，具体执行仍走稳定的场景动作。
-                when {
-                    OneHourScenarioPolicy.isAcceptOpenSlot(normalized.intent) -> acceptOpenSlot(displayText)
-                    OneHourScenarioPolicy.isKeepOriginalSlot(normalized.intent) -> keepOriginalSlot(displayText)
-                    else -> askOpenSlotClarification(displayText)
-                }
-            }
-        }
-
-        private fun askOpenSlotClarification(userText: String) {
-            val (conversations, decision) = OneHourScenarioPolicy.openSlotClarification(userText)
-            val prompt = decision.toDecisionPrompt()
-            _frame.update {
-                it.copy(
-                    busy = false,
-                    statusLabel = "等待",
-                    decisionPrompt = prompt,
-                    activeActionValue = null,
-                    conversationItems = it.conversationItems + conversations.map { item -> item.toConversationItem() },
-                    progressLine = AgentProgressLine(
-                        label = "等待",
-                        detail = "等待用户决策",
-                        completed = it.progressLine.completed,
-                        total = it.progressLine.total,
                     ),
-                    debugTrace = appendTrace(it.debugTrace, "local decision clarification -> $userText"),
                 )
             }
+            if (result?.isOk == true) {
+                if (result.commands.isEmpty()) {
+                    recordScenarioAgentDiagnostic("user ${rawText.take(80)}", "LLM 未返回命令，未执行本地业务结果。")
+                } else {
+                    val guardError = ScenarioCommandGuard.validate(
+                        commands = result.commands,
+                        knownTaskIds = taskStates.keys,
+                        authorization = authorization,
+                    )
+                    if (guardError == null) {
+                        applyScenarioAgentCommands(result.commands, timeText)
+                    } else {
+                        recordScenarioAgentDiagnostic("user ${rawText.take(80)}", guardError)
+                    }
+                }
+                pendingSelectedActionLabel = null
+                handleDueTimelineEvents()
+                finishScenarioDecisionTurn(selectedActionValue, displayText)
+            } else {
+                val reason = result?.error ?: if (hasApiKey) {
+                    "LLM 编排超时，未执行本地业务结果。"
+                } else {
+                    "未配置 API Key，未执行本地业务结果。"
+                }
+                recordScenarioAgentDiagnostic("user ${rawText.take(80)}", reason)
+                pendingSelectedActionLabel = null
+                handleDueTimelineEvents()
+                finishScenarioDecisionTurn(selectedActionValue, displayText)
+            }
         }
 
-        private fun acceptOpenSlot(label: String) {
-            pendingSelectedActionLabel = null
-            applyOneHourFlowEffect(oneHourFlow.acceptPetCareSlot(label), blueprintTimeText(scenarioClock))
-        }
-
-        private fun keepOriginalSlot(label: String) {
-            pendingSelectedActionLabel = null
-            applyOneHourFlowEffect(oneHourFlow.keepOriginalPetCareSlot(label), blueprintTimeText(scenarioClock))
+        private fun finishScenarioDecisionTurn(
+            selectedActionValue: String?,
+            selectedActionLabel: String,
+        ) {
+            val resolvedAction = selectedActionValue?.let { ActionButton(selectedActionLabel, it) }
+            _frame.update { frame ->
+                val shouldRetainAction = resolvedAction != null && frame.decisionPrompt == null
+                frame.copy(
+                    busy = false,
+                    activeActionValue = if (shouldRetainAction) resolvedAction.value else null,
+                    selectedAction = if (shouldRetainAction) resolvedAction else null,
+                )
+            }
+            _frame.value.activeTaskId?.let { taskId ->
+                taskStates[taskId]?.let { task ->
+                    taskStates[taskId] = _frame.value.captureTaskState(task)
+                }
+            }
         }
 
         private fun applyOneHourFlowEffects(
@@ -1707,6 +2277,7 @@ class AgentExperienceViewModel
                         timeText = timeText,
                         body = effect.body,
                         actionLabel = effect.actionLabel,
+                        callTranscriptText = effect.callTranscriptText,
                     ),
                 )
             }
@@ -1755,6 +2326,7 @@ class AgentExperienceViewModel
                 stageCards = stageCards,
                 decisionPrompt = decisionPrompt,
                 activeActionValue = activeActionValue,
+                selectedAction = selectedAction,
                 finalSummary = finalSummary,
                 error = error,
             )
@@ -1765,12 +2337,7 @@ class AgentExperienceViewModel
                 activeTaskTitle = title,
                 activeTaskSubtitle = subtitle,
                 taskCards = taskCardsFor(activeId = id),
-                statusLabel = when (status) {
-                    AgentTimelineStatus.BLOCKED -> "Waiting for decision"
-                    AgentTimelineStatus.DONE -> "Complete"
-                    AgentTimelineStatus.FAILED -> "Error"
-                    else -> "Running"
-                },
+                statusLabel = statusLabelFor(status),
                 hasStarted = true,
                 conversationItems = conversationItems,
                 taskLogs = taskLogs,
@@ -1780,9 +2347,18 @@ class AgentExperienceViewModel
                 stageCards = stageCards,
                 decisionPrompt = decisionPrompt,
                 activeActionValue = activeActionValue,
+                selectedAction = selectedAction,
                 finalSummary = finalSummary,
                 error = error,
             )
+
+        private fun statusLabelFor(status: AgentTimelineStatus): String =
+            when (status) {
+                AgentTimelineStatus.BLOCKED -> "Waiting for decision"
+                AgentTimelineStatus.DONE -> "Complete"
+                AgentTimelineStatus.FAILED -> "Error"
+                else -> "Running"
+            }
 
         private fun taskCardsFor(activeId: String?): List<AgentTaskCard> =
             taskStates.values
@@ -1810,7 +2386,7 @@ class AgentExperienceViewModel
         }
 
         private fun List<AgentParticipant>.withParticipant(participant: AgentParticipant): List<AgentParticipant> =
-            if (any { it.id == participant.id }) this else this + participant
+            withCanonicalParticipant(participant).takeLast(MAX_PARTICIPANTS)
 
         private fun appendSystemEvent(
             existing: List<AgentSystemEvent>,
@@ -2042,6 +2618,21 @@ class AgentExperienceViewModel
             return (existing + AgentConversationItem(nextId("conversation"), role, text)).takeLast(MAX_CONVERSATION_ITEMS)
         }
 
+        private fun appendConversationItems(
+            existing: List<AgentConversationItem>,
+            values: List<AgentConversationItem>,
+        ): List<AgentConversationItem> {
+            if (values.isEmpty()) return existing
+            val merged = values.fold(existing) { items, value ->
+                if (items.any { it.role == value.role && it.text == value.text }) {
+                    items
+                } else {
+                    items + value
+                }
+            }
+            return merged.takeLast(MAX_CONVERSATION_ITEMS)
+        }
+
         private fun AgentExperienceFrame.withPendingSelectedAction(): AgentExperienceFrame {
             val label = pendingSelectedActionLabel?.takeIf { it.isNotBlank() } ?: return this
             pendingSelectedActionLabel = null
@@ -2059,7 +2650,33 @@ class AgentExperienceViewModel
             values: List<AgentTaskLog>,
         ): List<AgentTaskLog> {
             if (values.isEmpty()) return existing
-            return (existing + values).takeLast(MAX_TASK_LOGS)
+            val merged = values.fold(existing) { logs, value ->
+                if (logs.any { it.isSameTaskLog(value) }) {
+                    logs
+                } else {
+                    logs + value
+                }
+            }
+            return merged.takeLast(MAX_TASK_LOGS)
+        }
+
+        private fun AgentTaskLog.isSameTaskLog(other: AgentTaskLog): Boolean {
+            if (timeText != other.timeText) return false
+            if (text == other.text) return true
+            val observedPayload = text.observedFactPayload() ?: return false
+            return observedPayload == other.text.observedFactPayload()
+        }
+
+        private fun String.observedFactPayload(): String? {
+            val value = trim()
+            val isObservedFact =
+                value.startsWith("收到") ||
+                    value.startsWith("触发提醒") ||
+                    value.contains("通话结束")
+            if (!isObservedFact) return null
+            return value.substringAfter('：', missingDelimiterValue = "")
+                .trim()
+                .takeIf { it.length >= 4 }
         }
 
         private fun appendTrace(existing: List<String>, value: String): List<String> =
@@ -2088,6 +2705,7 @@ class AgentExperienceViewModel
             private const val MAX_AUTO_CONTINUATIONS = 14
             private const val AUTO_TRIGGER_DELAY_MS = 5_000L
             private const val SCENARIO_CLOCK_TICK_MS = 60_000L
+            private const val SCENARIO_PLANNER_TIMEOUT_MS = 45_000L
             private const val CLOCK_LOOP_INTERVAL_MS = 1_000L
             private const val CALL_CONNECTED_DISPLAY_MS = 6_000L
             private const val CLOCK_ADVANCE_STEPS = 30

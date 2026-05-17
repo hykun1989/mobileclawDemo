@@ -7,8 +7,6 @@ import com.mobilebot.scenarios.petgrooming.PetGroomingDecisionIntents
 import com.mobilebot.scenarios.petgrooming.PetGroomingMilestone
 import com.mobilebot.scenarios.petgrooming.PetGroomingMilestoneDetector
 import com.mobilebot.scenarios.petgrooming.PetGroomingScenarioSpec
-import com.mobilebot.scenarios.petgrooming.PetGroomingTaskSurface
-import com.mobilebot.scenarios.runtime.ScenarioConversation
 import com.mobilebot.scenarios.runtime.ScenarioDecision
 import org.json.JSONObject
 import java.time.LocalDate
@@ -181,8 +179,41 @@ object OneHourScenarioPolicy {
             else -> null
         }
 
-    fun openSlotClarification(userText: String): Pair<List<ScenarioConversation>, ScenarioDecision> =
-        PetGroomingTaskSurface.openSlotClarification(userText)
+    fun orchestrationInstruction(
+        plannerPolicyJson: String,
+    ): String =
+        """
+            你需要根据系统事件事实、当前任务状态和用户记忆，规划这一轮需要执行的受控命令。
+            plannerPolicy 是运行时边界和授权，不是参考答案；不要假设存在本地兜底业务结果。
+            任务更新、追问、完成动作都通过 emit_scenario_commands 输出。
+            如果需要追问用户，ask_user 必须包含 decision.text 和 decision.actions，action 必须包含 label/key。
+            短信和提醒属于副作用，只能在 plannerPolicy 授权相同目标或时间时输出。
+            如果 plannerPolicy 针对当前事实提供 protocol block，必须按其中的命令顺序和约束执行。
+            不要输出解释文本，只调用 emit_scenario_commands。
+
+            plannerPolicy:
+            $plannerPolicyJson
+        """.trimIndent()
+
+    fun userDecisionInstruction(
+        userText: String,
+        plannerPolicyJson: String,
+    ): String =
+        """
+            用户刚刚回复：$userText。
+            你需要先理解用户真实意图，再输出受控任务命令。
+            plannerPolicy 是边界和授权，不是参考答案；不要把所有未知回复都强行拉回现有按钮。
+            如果用户表达了任务终止、对象不存在、无需继续或条件变化，应更新任务为停止/完成并清空决策，而不是继续追问原二选一。
+            如果用户明确同意改到 14:00，通常需要更新任务、通知 PetSmart 和 Driver，并监听 Driver 确认；这些副作用只能在 plannerPolicy 授权时输出。
+            如果 plannerPolicy 提供协议块，例如 petSlotAcceptanceProtocol，按协议块规划命令顺序和关键时间，不要自行编造接送时间。
+            只有在用户确实仍围绕排期但表达不清时，才使用 ask_user 追问。
+            如果需要追问用户，ask_user 必须包含 decision.text 和 decision.actions，action 必须包含 label/key。
+            短信和提醒属于副作用，只能在 plannerPolicy 授权相同目标或时间时输出。
+            不要输出解释文本，只调用 emit_scenario_commands。
+
+            plannerPolicy:
+            $plannerPolicyJson
+        """.trimIndent()
 }
 
 class OneHourScenarioRunTracker {

@@ -99,6 +99,10 @@ fun AgentExperienceScreen(
     var blueprintOpen by rememberSaveable { mutableStateOf(false) }
     var autoOpenedTaskIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
 
+    LaunchedEffect(Unit) {
+        viewModel.markScreenReady()
+    }
+
     LaunchedEffect(frame.activeTaskId, frame.taskLogs.size) {
         val taskId = frame.activeTaskId
         if (taskId != null && frame.taskLogs.isNotEmpty() && taskId !in autoOpenedTaskIds) {
@@ -441,7 +445,12 @@ private fun BlueprintDeck(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Text(
                         text = frame.activeTaskTitle,
                         color = AgentWhite,
@@ -449,6 +458,7 @@ private fun BlueprintDeck(
                         lineHeight = 26.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = "任务蓝图",
@@ -523,10 +533,14 @@ private fun WorkbenchArea(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
-        if (frame.taskCards.isEmpty() && frame.recentSystemEvents.isEmpty()) {
+        if (frame.taskCards.isEmpty()) {
             item {
                 Text(
-                    text = "等待系统事件。",
+                    text = when {
+                        frame.recentSystemEvents.isEmpty() -> "等待系统事件。"
+                        frame.busy -> "正在处理系统事件。"
+                        else -> "等待下一系统事件。"
+                    },
                     color = AgentMuted,
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
@@ -548,7 +562,7 @@ private fun WorkbenchArea(
                 TaskCardRow(task = task, onClick = { onSelectTask(task.id) })
             }
         }
-        if (frame.recentSystemEvents.isNotEmpty()) {
+        if (frame.taskCards.isNotEmpty() && frame.recentSystemEvents.isNotEmpty()) {
             item {
                 Text(
                     text = "系统事件",
@@ -669,10 +683,11 @@ private fun SessionArea(
     modifier: Modifier = Modifier,
 ) {
     val messages = frame.conversationItems
-    val actions = remember(frame.decisionPrompt, frame.hasStarted, frame.finalSummary, frame.error) {
+    val actions = remember(frame.decisionPrompt, frame.selectedAction, frame.hasStarted, frame.finalSummary, frame.error) {
         conversationActions(frame)
     }
     val activeDecision = frame.decisionPrompt != null
+    val resolvedAction = frame.decisionPrompt == null && frame.selectedAction != null
     val listState = rememberLazyListState()
     val lastItemIndex = messages.lastIndex + if (actions.isNotEmpty()) 1 else 0
     val latestMessageKey = messages.lastOrNull()?.let { message ->
@@ -706,7 +721,7 @@ private fun SessionArea(
                 .weight(1f),
             state = listState,
             contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.Bottom),
         ) {
             items(messages) { message ->
                 ConversationBubble(message)
@@ -716,7 +731,8 @@ private fun SessionArea(
                     ConversationActionRow(
                         actions = actions,
                         activeActionValue = frame.activeActionValue,
-                        enabled = !frame.busy,
+                        enabled = !frame.busy && !resolvedAction,
+                        loading = frame.busy,
                         onAction = { action ->
                             if (activeDecision) onAction(action) else onStart()
                         },
@@ -732,6 +748,7 @@ private fun ConversationActionRow(
     actions: List<ActionButton>,
     activeActionValue: String?,
     enabled: Boolean,
+    loading: Boolean,
     onAction: (ActionButton) -> Unit,
 ) {
     LazyRow(
@@ -745,6 +762,7 @@ private fun ConversationActionRow(
             ActionOptionBubble(
                 label = action.label,
                 selected = action.value == activeActionValue,
+                loading = loading && action.value == activeActionValue,
                 enabled = enabled,
                 onClick = { onAction(action) },
             )
@@ -755,6 +773,7 @@ private fun ConversationActionRow(
 private fun ActionOptionBubble(
     label: String,
     selected: Boolean,
+    loading: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -772,7 +791,7 @@ private fun ActionOptionBubble(
         modifier = Modifier
             .height(67.dp)
             .widthIn(max = 180.dp)
-            .loadingActionBorder(selected = selected, phase = phase),
+            .loadingActionBorder(selected = loading, phase = phase),
         enabled = enabled,
         color = when {
             selected -> AgentPanelActive
@@ -1700,6 +1719,7 @@ private fun PinIndicator(
 private fun conversationActions(frame: AgentExperienceFrame): List<ActionButton> =
     when {
         frame.decisionPrompt != null -> frame.decisionPrompt.actions
+        frame.selectedAction != null -> listOf(frame.selectedAction)
         frame.error != null -> listOf(ActionButton("重试", "Retry"))
         else -> emptyList()
     }

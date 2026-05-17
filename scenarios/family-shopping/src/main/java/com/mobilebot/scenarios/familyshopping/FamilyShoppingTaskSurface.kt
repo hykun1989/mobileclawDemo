@@ -12,8 +12,21 @@ import com.mobilebot.scenarios.runtime.ScenarioTaskUpdate
 object FamilyShoppingTaskSurface {
     const val TASK_ID = "family-shopping-live"
 
-    fun fromEllaCall(): ScenarioTaskSeed =
-        ScenarioTaskSeed(
+    fun transcriptForAudioRef(audioRef: String): FamilyShoppingCallTranscript? =
+        when (audioRef) {
+            ELLA_CALL_TRANSCRIPT.audioRef -> ELLA_CALL_TRANSCRIPT
+            else -> null
+        }
+
+    fun transcriptForIncomingCall(callId: String): FamilyShoppingCallTranscript? =
+        when (callId) {
+            "ella-call" -> ELLA_CALL_TRANSCRIPT
+            else -> null
+        }
+
+    fun fromEllaCall(audioRef: String = ELLA_CALL_TRANSCRIPT.audioRef): ScenarioTaskSeed {
+        val transcript = transcriptForAudioRef(audioRef) ?: ELLA_CALL_TRANSCRIPT
+        return ScenarioTaskSeed(
             taskId = TASK_ID,
             title = "家庭采购",
             subtitle = "Ella 电话交代的待办",
@@ -21,12 +34,12 @@ object FamilyShoppingTaskSurface {
             conversations = listOf(
                 ScenarioConversation(
                     ScenarioSurfaceRole.AGENT,
-                    "刚才 Ella 电话里提到周末家庭采购，我已经帮你建立任务跟踪，会继续整理需要确认的事项。",
+                    "通话转写：${transcript.transcript} 我已据此建立家庭采购任务。",
                 ),
             ),
             logs = listOf(
-                ScenarioLog("通话转写完成：识别到 Ella 交代的家庭采购待办。"),
-                ScenarioLog("新建家庭采购任务。"),
+                ScenarioLog("通话转写完成：${transcript.summary}"),
+                ScenarioLog("提取待办：${transcript.taskTitle}（${transcript.items.joinToString("、")}）。"),
             ),
             participants = listOf(ELLA),
             progress = ScenarioProgress(
@@ -36,6 +49,7 @@ object FamilyShoppingTaskSurface {
                 total = 5,
             ),
         )
+    }
 
     fun priorityFollowup(messageBody: String): ScenarioTaskUpdate =
         ScenarioTaskUpdate(
@@ -143,4 +157,20 @@ object FamilyShoppingTaskSurface {
         displayName = "Ole",
         role = "market",
     )
+
+    private val ELLA_CALL_TRANSCRIPT = FamilyShoppingCallTranscript(
+        audioRef = "ella-call-ended",
+        transcript = "Ella 说下午如果方便，帮家里补低脂牛奶、常用洗衣液和一点水果；她强调牛奶和洗衣液优先，水果顺路再买。",
+        summary = "低脂牛奶和常用洗衣液优先，水果顺路再买。",
+        taskTitle = "家庭采购",
+        items = listOf("低脂牛奶", "常用洗衣液", "水果可选"),
+    )
 }
+
+data class FamilyShoppingCallTranscript(
+    val audioRef: String,
+    val transcript: String,
+    val summary: String,
+    val taskTitle: String,
+    val items: List<String>,
+)

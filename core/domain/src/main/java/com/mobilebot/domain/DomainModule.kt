@@ -21,20 +21,20 @@ import com.mobilebot.domain.tools.SetAlarmTool
 import com.mobilebot.domain.tools.SetTimerTool
 import com.mobilebot.domain.tools.ShareTextTool
 import com.mobilebot.domain.tools.PublishFactTool
-import com.mobilebot.domain.tools.SaveMemoryTool
-import com.mobilebot.domain.tools.RecallMemoriesTool
-import com.mobilebot.domain.tools.DeleteMemoryTool
 import com.mobilebot.domain.tools.SpawnSubtaskTool
 import com.mobilebot.domain.tools.CreateCalendarEventTool
 import com.mobilebot.domain.tools.CreateNotificationTool
 import com.mobilebot.domain.tools.DeepLinkAppTool
+import com.mobilebot.domain.tools.DeleteMemoryTool
 import com.mobilebot.domain.tools.GetDeviceStateTool
 import com.mobilebot.domain.tools.PlayMediaTool
 import com.mobilebot.domain.tools.QueryCalendarTool
 import com.mobilebot.domain.tools.QueryServiceTool
 import com.mobilebot.domain.tools.RecordExpenseTool
+import com.mobilebot.domain.tools.RecallMemoriesTool
 import com.mobilebot.domain.tools.SkillTool
 import com.mobilebot.domain.tools.ResolvePlaceTool
+import com.mobilebot.domain.tools.SaveMemoryTool
 import com.mobilebot.domain.tools.ToggleFlashlightTool
 import com.mobilebot.domain.tools.TranscribeCallTool
 import com.mobilebot.domain.tools.WriteSandboxFileTool
@@ -199,4 +199,5 @@ abstract class DomainToolModule {
     @Binds
     @IntoSet
     abstract fun bindRecordExpense(tool: RecordExpenseTool): Tool
+
 }

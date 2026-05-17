@@ -1963,9 +1963,7 @@ class AgentExperienceViewModel
                             taskId = command.taskId,
                             subtitle = taskStates[command.taskId]?.subtitle.orEmpty(),
                             status = ScenarioSurfaceStatus.BLOCKED,
-                            conversations = listOf(
-                                ScenarioConversation(ScenarioSurfaceRole.AGENT, command.decision.text),
-                            ),
+                            conversations = emptyList(),
                             progress = taskStates[command.taskId]?.progressLine?.toScenarioProgress()
                                 ?: ScenarioProgress("等待", "等待用户决策", 0, 1),
                             decision = command.decision,
